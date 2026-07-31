@@ -231,12 +231,10 @@ const requestJson = async <T>(
 
       const body = await response.json().catch(() => undefined) as unknown;
       const error = body && typeof body === "object" && "error" in body
-        ? (body as { error?: { code?: unknown; retryable?: unknown } }).error
+        ? (body as { error?: { code?: unknown; retryable?: unknown; request_id?: unknown } }).error
         : undefined;
       const code = typeof error?.code === "string" ? error.code : `HTTP_${response.status}`;
-      const requestId = body && typeof body === "object" && "request_id" in body
-        ? (body as { request_id?: unknown }).request_id
-        : undefined;
+      const requestId = error?.request_id;
       const retryable = error?.retryable === true || githubRateLimited(response) || response.status >= 500;
       if (!retryable || attempt >= options.maxRetries) {
         if (typeof requestId === "string" && /^[0-9a-f-]{36}$/i.test(requestId)) {
