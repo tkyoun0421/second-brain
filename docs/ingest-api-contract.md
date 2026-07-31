@@ -612,6 +612,7 @@ quarantined_permanent
     "confirmed",
     "verified"
   ],
+  "tags": ["postgresql"],
   "limit": 20,
   "cursor": null
 }
@@ -646,7 +647,7 @@ quarantined_permanent
 }
 ```
 
-검색 정렬 규칙은 `context-contract.md`를 따릅니다. API가 반환하는 cursor는 opaque 문자열이며 클라이언트가 해석하지 않습니다.
+`tags`를 주면 하나 이상이 일치하는 기억만 반환합니다. 검색 정렬 규칙은 `context-contract.md`를 따릅니다. API가 반환하는 cursor는 opaque 문자열이며 클라이언트가 해석하지 않습니다.
 
 ### `GET /v1/memories/{memory_id}`
 

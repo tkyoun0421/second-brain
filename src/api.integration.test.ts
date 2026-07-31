@@ -17,7 +17,7 @@ const principal: Principal = {
   userId: ownerId,
   permissions: new Set([
     "github_sync:checkpoint", "github_source:write", "memory:propose", "memory:read", "memory:confirm",
-    "memory:supersede", "agent_run:write", "context:read",
+    "memory:supersede", "memory:forget", "agent_run:write", "context:read",
   ]),
   repositoryNodeIds: new Set(["R_api_test"]),
 };
@@ -27,7 +27,7 @@ const verifier: PrincipalVerifier = { async verify() { return principal; } };
 test("API persists a sync item and a proposed decision with RLS context", { skip: !databaseUrl }, async () => {
   const raw = new Pool({ connectionString: databaseUrl });
   const database = new PostgresDatabase(databaseUrl!);
-  const app = buildApp({ database, verifier });
+  const app = buildApp({ database, verifier, forgetPreviewSecret: "test-forget-preview-secret-at-least-32" });
   try {
     await raw.query("insert into auth.users (id) values ($1) on conflict do nothing", [ownerId]);
 
@@ -229,7 +229,7 @@ test("API persists a sync item and a proposed decision with RLS context", { skip
     const search = await app.inject({
       method: "POST",
       url: "/v1/memories/search",
-      payload: { query: "API", limit: 10 },
+      payload: { query: "API", tags: ["api"], limit: 10 },
     });
     assert.equal(search.statusCode, 200, search.body);
     assert.equal(search.json().data.items[0]?.id, replacementId, search.body);
@@ -249,6 +249,85 @@ test("API persists a sync item and a proposed decision with RLS context", { skip
     assert.equal(context.statusCode, 200, context.body);
     assert.equal(context.json().data.decisions[0].id, replacementId);
 
+    const forgetPreview = await app.inject({
+      method: "POST",
+      url: `/v1/memories/${replacementId}/forget-preview`,
+      payload: {
+        expected_revision: 2,
+        reason_code: "user_requested",
+        delete_linked_source: true,
+      },
+    });
+    assert.equal(forgetPreview.statusCode, 200, forgetPreview.body);
+    assert.equal(forgetPreview.json().data.impact.linked_sources, 1);
+    assert.equal(forgetPreview.json().data.impact.other_active_memories_using_source, 0);
+    const previewToken = forgetPreview.json().data.preview_token as string;
+
+    const mismatchedForget = await app.inject({
+      method: "POST",
+      url: `/v1/memories/${replacementId}/forget`,
+      headers: { "x-idempotency-key": "mcp:api-test:forget:wrong:0001" },
+      payload: {
+        expected_revision: 2,
+        reason_code: "user_requested",
+        delete_linked_source: false,
+        preview_token: previewToken,
+        confirmation: {
+          origin: "explicit_user",
+          source: { type: "user_message", id: "message-45-forget" },
+          confirmed_at: "2026-07-31T00:08:00Z",
+        },
+      },
+    });
+    assert.equal(mismatchedForget.statusCode, 409, mismatchedForget.body);
+    assert.equal(mismatchedForget.json().error.code, "FORGET_PREVIEW_INVALID");
+
+    const forgetPayload = {
+      expected_revision: 2,
+      reason_code: "user_requested",
+      delete_linked_source: true,
+      preview_token: previewToken,
+      confirmation: {
+        origin: "explicit_user",
+        source: { type: "user_message", id: "message-45-forget" },
+        confirmed_at: "2026-07-31T00:08:00Z",
+      },
+    };
+    const forgotten = await app.inject({
+      method: "POST",
+      url: `/v1/memories/${replacementId}/forget`,
+      headers: { "x-idempotency-key": "mcp:api-test:forget:0001" },
+      payload: forgetPayload,
+    });
+    assert.equal(forgotten.statusCode, 200, forgotten.body);
+    assert.equal(forgotten.json().data.status, "deleted");
+    assert.equal(forgotten.json().data.revision, 3);
+
+    const forgetReplay = await app.inject({
+      method: "POST",
+      url: `/v1/memories/${replacementId}/forget`,
+      headers: { "x-idempotency-key": "mcp:api-test:forget:0001" },
+      payload: forgetPayload,
+    });
+    assert.equal(forgetReplay.statusCode, 200, forgetReplay.body);
+    assert.equal(forgetReplay.headers["idempotency-replayed"], "true");
+
+    const redaction = await raw.query<{ status: string; statement: string; evidence_count: string; lifecycle_status: string; content: string | null }>(
+      `select m.status, m.statement,
+         (select count(*)::text from public.memory_evidence where owner_id = $1 and memory_id = m.id) as evidence_count,
+         sr.lifecycle_status, ss.content
+         from public.memories m
+         join public.source_records sr on sr.owner_id = m.owner_id and sr.external_id = 'user_message:message-43'
+         join public.source_snapshots ss on ss.owner_id = sr.owner_id and ss.source_id = sr.id
+        where m.owner_id = $1 and m.id = $2::bigint`,
+      [ownerId, replacementId],
+    );
+    assert.equal(redaction.rows[0]?.status, "deleted");
+    assert.equal(redaction.rows[0]?.statement, "[deleted]");
+    assert.equal(redaction.rows[0]?.evidence_count, "0");
+    assert.equal(redaction.rows[0]?.lifecycle_status, "deleted");
+    assert.equal(redaction.rows[0]?.content, null);
+
     const counts = await raw.query<{ snapshot_count: string; memory_count: string; evidence_count: string }>(
       `select
          (select count(*)::text from public.source_snapshots where owner_id = $1) as snapshot_count,
@@ -258,7 +337,7 @@ test("API persists a sync item and a proposed decision with RLS context", { skip
     );
     assert.equal(counts.rows[0]?.snapshot_count, "3");
     assert.equal(counts.rows[0]?.memory_count, "2");
-    assert.equal(counts.rows[0]?.evidence_count, "2");
+    assert.equal(counts.rows[0]?.evidence_count, "1");
   } finally {
     await app.close();
     await database.close();

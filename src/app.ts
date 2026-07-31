@@ -21,6 +21,8 @@ import {
   heartbeatSchema,
   contextQuerySchema,
   memoryConfirmSchema,
+  memoryForgetPreviewSchema,
+  memoryForgetSchema,
   memorySearchSchema,
   memorySupersedeSchema,
   syncCompleteSchema,
@@ -40,6 +42,8 @@ import {
   processSyncItem,
   startSyncRun,
   supersedeMemory,
+  forgetMemory,
+  previewMemoryForget,
 } from "./services.js";
 
 declare module "fastify" {
@@ -51,6 +55,7 @@ declare module "fastify" {
 export interface AppDependencies {
   database: Database;
   verifier: PrincipalVerifier;
+  forgetPreviewSecret: string;
 }
 
 const numericPathId = (value: string, name: string) => {
@@ -81,7 +86,7 @@ const sendIdempotent = (
   return response.send(outcome.response.body);
 };
 
-export const buildApp = ({ database, verifier }: AppDependencies): FastifyInstance => {
+export const buildApp = ({ database, verifier, forgetPreviewSecret }: AppDependencies): FastifyInstance => {
   const app = Fastify({
     bodyLimit: 4 * 1024 * 1024,
     logger: false,
@@ -269,6 +274,27 @@ export const buildApp = ({ database, verifier }: AppDependencies): FastifyInstan
     return sendIdempotent(reply, await supersedeMemory(
       database, principal, request.id, idempotencyKeyOf(request), hashRequest(input),
       numericPathId(request.params.memory_id, "memory_id"), input,
+    ));
+  });
+
+  app.post<{ Params: { memory_id: string } }>("/v1/memories/:memory_id/forget-preview", async (request) => {
+    const input = memoryForgetPreviewSchema.parse(bodyOf(request));
+    rejectSensitiveData(input);
+    return {
+      request_id: request.id,
+      data: await previewMemoryForget(
+        database, principalOf(request), numericPathId(request.params.memory_id, "memory_id"), input, forgetPreviewSecret,
+      ),
+    };
+  });
+
+  app.post<{ Params: { memory_id: string } }>("/v1/memories/:memory_id/forget", async (request, reply) => {
+    const principal = principalOf(request);
+    const input = memoryForgetSchema.parse(bodyOf(request));
+    rejectSensitiveData(input);
+    return sendIdempotent(reply, await forgetMemory(
+      database, principal, request.id, idempotencyKeyOf(request), hashRequest(input),
+      numericPathId(request.params.memory_id, "memory_id"), input, forgetPreviewSecret,
     ));
   });
 

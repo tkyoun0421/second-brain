@@ -5,6 +5,7 @@ const environmentSchema = z.object({
   SUPABASE_URL: z.string().url(),
   SUPABASE_JWT_ISSUER: z.string().url(),
   SUPABASE_JWT_AUDIENCE: z.string().min(1).default("authenticated"),
+  MEMORY_FORGET_PREVIEW_SECRET: z.string().min(32),
   PORT: z.coerce.number().int().min(1).max(65535).default(3000),
 });
 

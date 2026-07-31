@@ -1113,6 +1113,24 @@ AI 제안 교체:
 
 ## 4.6 `brain_forget`
 
+The implemented v1 wire contract uses the API-aligned field names below. `preview` is read-only
+and does not need an idempotency key; `execute` needs the preview's matching token and an
+idempotency key.
+
+```json
+{
+  "mode": "preview",
+  "memory_id": "42",
+  "expected_revision": 3,
+  "reason_code": "user_requested",
+  "delete_linked_source": false
+}
+```
+
+`reason_code` is one of `user_requested`, `sensitive_data`, `retention_expired`, or
+`unauthorized_source`. `user_requested` execution requires an `explicit_user` confirmation;
+the other reasons require a `policy_enforcement` confirmation sourced from `policy_event`.
+
 사용자의 삭제 요청 또는 민감정보 발견에 따라 영향 범위를 미리 보거나 실제 삭제·비식별화합니다.
 
 ### 입력

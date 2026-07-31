@@ -209,12 +209,13 @@ export const searchMemories = async (
         and m.status = any($4::public.memory_status[])
         and lower(m.statement || ' ' || coalesce(m.rationale, '')) like '%' || lower($5) || '%'
         and (cardinality($6::text[]) = 0 or (s.scope_type::text || ':' || s.scope_key) = any($6::text[]))
-        and ($7::timestamptz is null or (m.updated_at, m.id) < ($7::timestamptz, $8::bigint))
+        and (cardinality($7::text[]) = 0 or m.tags && $7::text[])
+        and ($8::timestamptz is null or (m.updated_at, m.id) < ($8::timestamptz, $9::bigint))
       order by m.updated_at desc, m.id desc
-      limit $9`,
+      limit $10`,
     [
       principal.userId, [...principal.repositoryNodeIds], kinds, statuses, input.query,
-      requestedScopes, cursor.updatedAt, cursor.id, input.limit + 1,
+      requestedScopes, input.tags ?? [], cursor.updatedAt, cursor.id, input.limit + 1,
     ],
   );
   const hasMore = result.rows.length > input.limit;

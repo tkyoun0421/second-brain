@@ -198,6 +198,19 @@ export const memoryConfirmSchema = z.object({
   confirmation: confirmationSchema.refine((value) => value.origin === "explicit_user", "confirmation must originate from an explicit user action"),
 });
 
+const forgetReasonCodeSchema = z.enum(["user_requested", "sensitive_data", "retention_expired", "unauthorized_source"]);
+
+export const memoryForgetPreviewSchema = z.object({
+  expected_revision: z.number().int().positive(),
+  reason_code: forgetReasonCodeSchema,
+  delete_linked_source: z.boolean(),
+});
+
+export const memoryForgetSchema = memoryForgetPreviewSchema.extend({
+  preview_token: nonBlank.max(8_000),
+  confirmation: confirmationSchema,
+});
+
 const replacementSchema = z.object({
   kind: memoryKindSchema,
   statement: nonBlank.max(2_000),
@@ -261,6 +274,7 @@ export const memorySearchSchema = z.object({
   kinds: z.array(z.enum(["learning", "decision", "preference", "failure", "procedure", "constraint"])).max(6).optional(),
   scopes: z.array(scopeSchema).max(50).optional(),
   statuses: z.array(z.enum(["proposed", "confirmed", "verified", "superseded", "deprecated", "deleted"])).max(6).optional(),
+  tags: z.array(nonBlank.max(100)).max(30).optional(),
   limit: z.number().int().min(1).max(100).default(20),
   cursor: z.string().min(1).max(1_000).nullable().default(null),
 });
@@ -275,3 +289,5 @@ export type MemorySearchInput = z.infer<typeof memorySearchSchema>;
 export type AgentRunFinishInput = z.infer<typeof agentRunFinishSchema>;
 export type MemoryConfirmInput = z.infer<typeof memoryConfirmSchema>;
 export type MemorySupersedeInput = z.infer<typeof memorySupersedeSchema>;
+export type MemoryForgetPreviewInput = z.infer<typeof memoryForgetPreviewSchema>;
+export type MemoryForgetInput = z.infer<typeof memoryForgetSchema>;

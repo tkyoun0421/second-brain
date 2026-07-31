@@ -12,6 +12,7 @@ const app = buildApp({
     issuer: config.SUPABASE_JWT_ISSUER,
     audience: config.SUPABASE_JWT_AUDIENCE,
   }),
+  forgetPreviewSecret: config.MEMORY_FORGET_PREVIEW_SECRET,
 });
 
 const close = async () => {

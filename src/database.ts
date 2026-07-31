@@ -31,7 +31,7 @@ export class PostgresDatabase implements Database {
     try {
       await client.query("BEGIN");
       await client.query("SET LOCAL statement_timeout = '5s'");
-      await client.query("SET LOCAL ROLE authenticated");
+      await client.query("SET LOCAL ROLE app_api");
       await client.query(
         "select set_config('request.jwt.claim.sub', $1, true)",
         [principal.userId],

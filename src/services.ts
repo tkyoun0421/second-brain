@@ -1,6 +1,12 @@
 import type { SqlClient, Database } from "./database.js";
 import { ApiError, invalidArgument } from "./errors.js";
 import { canonicalJson, sha256 } from "./hash.js";
+import {
+  createForgetPreviewToken,
+  invalidForgetPreviewToken,
+  verifyForgetPreviewToken,
+  type ForgetReasonCode,
+} from "./forget-preview-token.js";
 import { executeIdempotent } from "./idempotency.js";
 import {
   assertRepositoryAllowed,
@@ -13,6 +19,8 @@ import type {
   DecisionInput,
   FailureInput,
   MemoryConfirmInput,
+  MemoryForgetInput,
+  MemoryForgetPreviewInput,
   MemorySupersedeInput,
   SyncCompleteInput,
   SyncItem,
@@ -1108,6 +1116,192 @@ export const supersedeMemory = async (
           existing: { memory_id: predecessor.id, status: predecessor.status, revision: Number(predecessor.revision) },
           replacement: { memory_id: replacementRow.id, status: "proposed", revision: Number(replacementRow.revision) },
           transition: "proposal_created",
+        },
+      };
+    },
+  );
+};
+
+interface ForgetImpact {
+  memories: number;
+  linked_sources: number;
+  snapshots: number;
+  audit_payloads_to_redact: number;
+  other_active_memories_using_source: number;
+}
+
+const getForgetImpact = async (
+  client: SqlClient,
+  principal: Principal,
+  memoryId: string,
+): Promise<ForgetImpact> => {
+  const result = await client.query<ForgetImpact>(
+    `with target_sources as (
+       select distinct ss.source_id
+         from public.memory_evidence me
+         join public.source_snapshots ss on ss.owner_id = me.owner_id and ss.id = me.source_snapshot_id
+        where me.owner_id = $1 and me.memory_id = $2::bigint
+     ), affected_snapshots as (
+       select ss.id, ss.source_id
+         from public.source_snapshots ss
+         join target_sources ts on ts.source_id = ss.source_id
+        where ss.owner_id = $1
+     )
+     select
+       1::integer as memories,
+       (select count(*)::integer from target_sources) as linked_sources,
+       (select count(*)::integer from affected_snapshots) as snapshots,
+       (select count(*)::integer from public.audit_events ae
+         where ae.owner_id = $1 and ae.target_ids @> jsonb_build_array($2::text)) as audit_payloads_to_redact,
+       (select count(distinct me.memory_id)::integer
+          from public.memory_evidence me
+          join public.source_snapshots ss on ss.owner_id = me.owner_id and ss.id = me.source_snapshot_id
+          join target_sources ts on ts.source_id = ss.source_id
+          join public.memories m on m.owner_id = me.owner_id and m.id = me.memory_id
+         where me.owner_id = $1 and me.memory_id <> $2::bigint
+           and m.status in ('proposed', 'confirmed', 'verified')) as other_active_memories_using_source`,
+    [principal.userId, memoryId],
+  );
+  const impact = result.rows[0];
+  if (!impact) throw new ApiError({ statusCode: 500, code: "INTERNAL", message: "삭제 영향을 계산하지 못했습니다.", retryable: true });
+  return impact;
+};
+
+const requireForgetPermission = (principal: Principal, reasonCode: ForgetReasonCode) => {
+  requirePermission(principal, reasonCode === "sensitive_data" ? "memory:forget_sensitive" : "memory:forget");
+};
+
+const validateForgetConfirmation = (input: MemoryForgetInput) => {
+  const expectedOrigin = input.reason_code === "user_requested" ? "explicit_user" : "policy_enforcement";
+  if (input.confirmation.origin !== expectedOrigin) {
+    throw invalidArgument(`confirmation.origin must be ${expectedOrigin} for this forget reason`);
+  }
+  if (expectedOrigin === "policy_enforcement" && input.confirmation.source.type !== "policy_event") {
+    throw invalidArgument("policy-enforced deletion requires a policy_event confirmation source");
+  }
+};
+
+const assertForgettableMemory = (memory: MemoryTransitionRow) => {
+  if (memory.status === "deleted") throw invalidMemoryTransition();
+};
+
+export const previewMemoryForget = async (
+  database: Database,
+  principal: Principal,
+  memoryId: string,
+  input: MemoryForgetPreviewInput,
+  tokenSecret: string,
+) => {
+  requireForgetPermission(principal, input.reason_code);
+  return database.transaction(principal, async (client) => {
+    const result = await client.query<MemoryTransitionRow>(
+      `select id::text, kind, scope_id::text, status, revision::text, supersedes_id::text
+         from public.memories
+        where owner_id = $1 and id = $2::bigint`,
+      [principal.userId, memoryId],
+    );
+    const memory = result.rows[0];
+    if (!memory) throw notFound();
+    assertForgettableMemory(memory);
+    requireExpectedRevision(memory, input.expected_revision);
+    const impact = await getForgetImpact(client, principal, memoryId);
+    if (input.delete_linked_source && impact.other_active_memories_using_source > 0) {
+      throw conflict("linked_source_in_use", "다른 활성 기억이 사용하는 근거는 함께 삭제할 수 없습니다.");
+    }
+    const expiresAt = new Date(Date.now() + 5 * 60_000).toISOString();
+    const previewToken = createForgetPreviewToken({
+      version: 1,
+      ownerId: principal.userId,
+      memoryId,
+      expectedRevision: input.expected_revision,
+      reasonCode: input.reason_code,
+      deleteLinkedSource: input.delete_linked_source,
+      impactHash: sha256(canonicalJson(impact)),
+      expiresAt,
+    }, tokenSecret);
+    return { memory_id: memoryId, impact, preview_token: previewToken, expires_at: expiresAt };
+  });
+};
+
+export const forgetMemory = async (
+  database: Database,
+  principal: Principal,
+  requestId: string,
+  idempotencyKey: string,
+  requestHash: string,
+  memoryId: string,
+  input: MemoryForgetInput,
+  tokenSecret: string,
+) => {
+  requireForgetPermission(principal, input.reason_code);
+  validateForgetConfirmation(input);
+  const token = verifyForgetPreviewToken(input.preview_token, tokenSecret);
+  if (
+    token.ownerId !== principal.userId ||
+    token.memoryId !== memoryId ||
+    token.expectedRevision !== input.expected_revision ||
+    token.reasonCode !== input.reason_code ||
+    token.deleteLinkedSource !== input.delete_linked_source
+  ) throw invalidForgetPreviewToken();
+
+  return executeIdempotent<Record<string, unknown>>(
+    database,
+    principal,
+    {
+      key: idempotencyKey,
+      operation: makeOperation("/v1/memories/{memory_id}/forget"),
+      requestHash,
+      requestId,
+      audit: {
+        operation: "delete",
+        targetType: "memory",
+        targetIds: [memoryId],
+        redactedInput: { reason_code: input.reason_code, delete_linked_source: input.delete_linked_source },
+      },
+    },
+    async (client) => {
+      const memory = await getMemoryForUpdate(client, principal, memoryId);
+      assertForgettableMemory(memory);
+      requireExpectedRevision(memory, input.expected_revision);
+      const impact = await getForgetImpact(client, principal, memoryId);
+      if (sha256(canonicalJson(impact)) !== token.impactHash) throw invalidForgetPreviewToken();
+      if (input.delete_linked_source && impact.other_active_memories_using_source > 0) {
+        throw conflict("linked_source_in_use", "다른 활성 기억이 사용하는 근거는 함께 삭제할 수 없습니다.");
+      }
+      if (memory.kind === "failure") {
+        await client.query(
+          `update public.memory_failure_details
+              set resolution_status = 'observed', symptom = '[deleted]', context = null,
+                  attempted_approaches = '[]'::jsonb, cause = null, resolution = null, verification = null
+            where owner_id = $1 and memory_id = $2::bigint`,
+          [principal.userId, memoryId],
+        );
+      }
+      if (input.delete_linked_source) {
+        await client.query("select public.redact_memory_forget_sources($1::bigint)", [memoryId]);
+      }
+      await client.query(
+        "delete from public.memory_evidence where owner_id = $1 and memory_id = $2::bigint",
+        [principal.userId, memoryId],
+      );
+      await client.query("select public.redact_memory_audit_payloads($1::bigint)", [memoryId]);
+      const updated = await client.query<{ revision: string }>(
+        `update public.memories
+            set status = 'deleted', statement = '[deleted]', rationale = null, tags = '{}'::text[], details = '{}'::jsonb
+          where owner_id = $1 and id = $2::bigint
+          returning revision::text`,
+        [principal.userId, memoryId],
+      );
+      const row = updated.rows[0];
+      if (!row) throw notFound();
+      return {
+        statusCode: 200,
+        data: {
+          memory_id: memoryId,
+          status: "deleted",
+          revision: Number(row.revision),
+          impact,
+          linked_sources_redacted: input.delete_linked_source,
         },
       };
     },

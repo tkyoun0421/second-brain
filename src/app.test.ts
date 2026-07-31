@@ -29,7 +29,7 @@ const database: Database = {
 };
 
 test("health endpoint does not require authentication", async () => {
-  const app = buildApp({ database, verifier });
+  const app = buildApp({ database, verifier, forgetPreviewSecret: "test-forget-preview-secret-at-least-32" });
   const response = await app.inject({ method: "GET", url: "/v1/health" });
   assert.equal(response.statusCode, 200);
   assert.equal(response.json().data.status, "ok");
@@ -46,7 +46,7 @@ test("protected endpoints return the contract authentication envelope", async ()
       });
     },
   };
-  const app = buildApp({ database, verifier: unauthenticated });
+  const app = buildApp({ database, verifier: unauthenticated, forgetPreviewSecret: "test-forget-preview-secret-at-least-32" });
   const response = await app.inject({
     method: "GET",
     url: "/v1/github/repositories/R_example/checkpoint",
@@ -57,7 +57,7 @@ test("protected endpoints return the contract authentication envelope", async ()
 });
 
 test("memory input with a token is rejected before opening a database transaction", async () => {
-  const app = buildApp({ database, verifier });
+  const app = buildApp({ database, verifier, forgetPreviewSecret: "test-forget-preview-secret-at-least-32" });
   const response = await app.inject({
     method: "POST",
     url: "/v1/memories/decisions",
