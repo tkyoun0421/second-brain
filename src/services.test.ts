@@ -5,7 +5,7 @@ import type { QueryResultRow } from "pg";
 import type { Database } from "./database.js";
 import type { Principal } from "./principal.js";
 import type { SyncItem } from "./schemas.js";
-import { reconcileSyncRun, syncItemRequestHash } from "./services.js";
+import { reconcileSyncRun, syncItemIdempotencyKey, syncItemRequestHash } from "./services.js";
 
 const principal: Principal = {
   principalId: "11111111-1111-4111-8111-111111111111",
@@ -26,6 +26,7 @@ test("sync item idempotency ignores an observation timestamp change", () => {
   const observedAgain = { ...initial, observed_at: "2026-07-31T01:00:00.000Z" };
 
   assert.equal(syncItemRequestHash(initial), syncItemRequestHash(observedAgain));
+  assert.equal(syncItemIdempotencyKey(initial), `v2:${initial.idempotency_key}`);
 });
 
 test("reconcile tombstones prior missing candidates before marking the current misses", async () => {

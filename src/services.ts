@@ -104,6 +104,8 @@ export const syncItemRequestHash = (item: SyncItem) => {
   return sha256(canonicalJson(stableItem));
 };
 
+export const syncItemIdempotencyKey = (item: SyncItem) => `v2:${item.idempotency_key}`;
+
 export const getCheckpoint = async (
   database: Database,
   principal: Principal,
@@ -418,7 +420,7 @@ export const processSyncItem = async (
     database,
     principal,
     {
-      key: item.idempotency_key,
+      key: syncItemIdempotencyKey(item),
       operation: "github_source_item",
       requestHash: syncItemRequestHash(item),
       requestId,
