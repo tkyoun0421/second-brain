@@ -6,7 +6,7 @@
 
 ```text
 API 서버 전용 비밀: DATABASE_URL, MEMORY_FORGET_PREVIEW_SECRET
-API 서버 설정:     SUPABASE_URL, SUPABASE_JWT_ISSUER, SUPABASE_JWT_AUDIENCE, PORT
+API 서버 설정:     SUPABASE_URL, SUPABASE_JWT_ISSUER, SUPABASE_JWT_AUDIENCE, HOST, PORT
 MCP 호스트 전용:    SECOND_BRAIN_API_URL, SECOND_BRAIN_MCP_ACCESS_TOKEN
 GitHub Actions 전용: SECOND_BRAIN_API_URL, SECOND_BRAIN_GITHUB_SYNC_TOKEN, github.token
 ```
@@ -27,11 +27,12 @@ GitHub Actions 전용: SECOND_BRAIN_API_URL, SECOND_BRAIN_GITHUB_SYNC_TOKEN, git
 | `SUPABASE_JWT_ISSUER` | 예 | JWT의 `iss`와 일치해야 하는 issuer |
 | `SUPABASE_JWT_AUDIENCE` | 예 | JWT의 `aud`; 기본값은 `authenticated` |
 | `MEMORY_FORGET_PREVIEW_SECRET` | 예 | forget preview token 서명용, 최소 32자 비밀값 |
+| `HOST` | 아니오 | 기본 `127.0.0.1`; 관리형 HTTPS ingress 뒤 컨테이너에서는 `0.0.0.0` |
 | `PORT` | 아니오 | API listen port, 기본값 `3000` |
 
 `SUPABASE_URL`에서 `https://<project>.supabase.co/auth/v1/.well-known/jwks.json`을 구성해 검증 키를 읽습니다. `SUPABASE_JWT_ISSUER`와 `SUPABASE_JWT_AUDIENCE`는 발급한 JWT의 claim과 정확히 일치해야 합니다.
 
-현재 API 진입점은 `127.0.0.1`에 바인딩됩니다. 따라서 같은 장비의 MCP는 `http://127.0.0.1:<PORT>`로 연결할 수 있습니다. 다른 장비 또는 인터넷에서 접근시키는 HTTPS, reverse proxy, 터널 및 방화벽 구성은 아직 이 저장소가 제공하지 않는 운영 선택입니다.
+기본 API 진입점은 `127.0.0.1`에 바인딩됩니다. 따라서 같은 장비의 MCP는 `http://127.0.0.1:<PORT>`로 연결할 수 있습니다. 컨테이너 호스팅에서는 `HOST=0.0.0.0`을 설정하고, 플랫폼의 managed HTTPS ingress만 공개합니다. 실행 가능한 절차와 사전 조건은 [배포 가이드](deployment.md)를 따릅니다.
 
 데이터베이스 migration은 API를 시작하기 전에 대상 Supabase/PostgreSQL에 적용해야 합니다. 이 저장소에는 migration 파일은 있지만 배포용 migration 실행 명령이나 hosted Supabase 프로젝트 설정은 포함되어 있지 않습니다.
 

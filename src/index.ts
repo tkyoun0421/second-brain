@@ -1,7 +1,12 @@
+import { existsSync } from "node:fs";
 import { SupabaseJwtVerifier } from "./auth.js";
 import { buildApp } from "./app.js";
 import { loadConfig } from "./config.js";
 import { PostgresDatabase } from "./database.js";
+
+if (existsSync(".env")) {
+  process.loadEnvFile(".env");
+}
 
 const config = loadConfig();
 const database = new PostgresDatabase(config.DATABASE_URL);
@@ -23,4 +28,4 @@ const close = async () => {
 process.once("SIGINT", () => void close().finally(() => process.exit(0)));
 process.once("SIGTERM", () => void close().finally(() => process.exit(0)));
 
-await app.listen({ host: "127.0.0.1", port: config.PORT });
+await app.listen({ host: config.HOST, port: config.PORT });

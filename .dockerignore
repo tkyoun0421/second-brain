@@ -1,0 +1,12 @@
+.git
+.github
+.agents
+.env
+.env.*
+!.env.example
+node_modules
+dist
+coverage
+docs
+scripts
+supabase

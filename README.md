@@ -54,7 +54,7 @@ Codex·Claude ── 로컬 MCP 서버 ────┘                         �
 
 ## 로컬 실행과 검증
 
-Node.js 22 이상에서 의존성을 설치하고 `.env.example`을 API 서버 전용 환경 파일로 복사한 뒤 Supabase 및 PostgreSQL 값을 채웁니다. API는 현재 `127.0.0.1`에만 바인딩됩니다.
+Node.js 22 이상에서 의존성을 설치하고 `.env.example`을 API 서버 전용 환경 파일로 복사한 뒤 Supabase 및 PostgreSQL 값을 채웁니다. API는 기본적으로 `127.0.0.1`에만 바인딩됩니다. 컨테이너 배포는 `HOST=0.0.0.0`을 설정하고 관리형 HTTPS ingress 뒤에 둡니다. 실제 연결 절차는 [배포 가이드](docs/deployment.md)를 따릅니다.
 
 ```powershell
 npm install
