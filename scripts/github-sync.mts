@@ -587,7 +587,8 @@ if (isMain) {
     console.log(JSON.stringify({ status: result.status, mode: result.mode, summary: result.summary }));
   }).catch((error: unknown) => {
     const code = error instanceof SyncError ? error.code : "SYNC_FAILED";
-    console.error(`GitHub sync failed: ${code}`);
+    const detail = error instanceof SyncError ? error.message : "Unexpected sync runner failure.";
+    console.error(`GitHub sync failed: ${code} ${detail}`);
     process.exitCode = 1;
   });
 }
