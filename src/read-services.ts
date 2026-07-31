@@ -32,6 +32,10 @@ interface SourceRef {
   source_excerpt: string | null;
 }
 
+interface CountRow {
+  total_count: string;
+}
+
 const notFound = () => new ApiError({ statusCode: 404, code: "NOT_FOUND", message: "요청한 리소스를 찾을 수 없습니다." });
 
 const visibleMemorySql = `
@@ -64,6 +68,7 @@ const memorySummary = (memory: MemoryRow, sources: SourceRef[]) => ({
   kind: memory.kind,
   statement: memory.statement,
   status: memory.status,
+  created_at: memory.created_at,
   scope: { type: memory.scope_type, id: memory.scope_key },
   source_refs: sources.map(({ source_type, source_id }) => ({ source_type, source_id })),
   ...(memory.importance_score === null ? {} : {
@@ -265,14 +270,16 @@ export const listMemoryInbox = async (
   requirePermission(principal, "memory:read");
   const cursor = parseInboxCursor(input.cursor);
   const kinds = input.kinds ?? ["learning", "decision", "preference", "failure", "procedure", "constraint"];
-  const result = await client.query<MemoryRow>(
-    `select ${visibleMemoryColumns}
-     ${visibleMemorySql}
+  const inboxFilter = `
       where m.owner_id = $1
         and ${accessPredicate}
         and m.status = 'proposed'
         and m.kind = any($3::public.memory_kind[])
-        and (cardinality($4::text[]) = 0 or m.tags && $4::text[])
+        and (cardinality($4::text[]) = 0 or m.tags && $4::text[])`;
+  const result = await client.query<MemoryRow>(
+    `select ${visibleMemoryColumns}
+     ${visibleMemorySql}
+      ${inboxFilter}
         and ($5::smallint is null or (coalesce(m.importance_score, -1), m.created_at, m.id) < ($5::smallint, $6::timestamptz, $7::bigint))
       order by coalesce(m.importance_score, -1) desc, m.created_at desc, m.id desc
       limit $8`,
@@ -281,12 +288,19 @@ export const listMemoryInbox = async (
       cursor.importanceScore, cursor.createdAt, cursor.id, input.limit + 1,
     ],
   );
+  const count = await client.query<CountRow>(
+    `select count(*)::text as total_count
+     ${visibleMemorySql}
+     ${inboxFilter}`,
+    [principal.userId, [...principal.repositoryNodeIds], kinds, input.tags ?? []],
+  );
   const hasMore = result.rows.length > input.limit;
   const page = result.rows.slice(0, input.limit);
   const sourceMap = await getSources(client, principal.userId, page.map((memory) => memory.id));
   return {
     items: page.map((memory) => memorySummary(memory, sourceMap.get(memory.id) ?? [])),
     next_cursor: hasMore ? nextInboxCursor(page.at(-1)) : null,
+    total_count: Number(count.rows[0]?.total_count ?? 0),
   };
 });
 

@@ -41,6 +41,9 @@ test("Memory Inbox lists only proposed memories with owner-scoped importance pag
   const client: SqlClient = {
     async query<Row extends QueryResultRow>(text: string, values?: readonly unknown[]) {
       queries.push({ text, values });
+      if (text.includes("count(*)::text as total_count")) {
+        return { rows: [{ total_count: "14" }] as unknown as Row[], rowCount: 1 };
+      }
       if (text.includes("from public.memories m")) {
         return { rows: [
           memory("9", "2026-07-31T02:00:00.000Z"),
@@ -60,6 +63,7 @@ test("Memory Inbox lists only proposed memories with owner-scoped importance pag
   });
 
   assert.deepEqual(result.items.map((item) => item.id), ["9"]);
+  assert.equal(result.total_count, 14);
   assert.deepEqual(JSON.parse(Buffer.from(result.next_cursor ?? "", "base64url").toString("utf8")), {
     importance_score: 8, created_at: "2026-07-31T02:00:00.000Z", id: "9",
   });
@@ -69,4 +73,6 @@ test("Memory Inbox lists only proposed memories with owner-scoped importance pag
   assert.deepEqual(queries[0]?.values, [
     principal.userId, ["R_repo"], ["learning"], ["inbox"], null, null, null, 2,
   ]);
+  const countQuery = queries.find((query) => query.text.includes("count(*)::text as total_count"));
+  assert.deepEqual(countQuery?.values, [principal.userId, ["R_repo"], ["learning"], ["inbox"]]);
 });

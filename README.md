@@ -6,6 +6,8 @@ At an agent task checkpoint, `brain_capture_auto_memory` scores decision and fai
 Scores below 4 are discarded without a database write; scores 4 or above are saved as `proposed`
 Inbox items. Importance never changes a memory to `confirmed` or `verified` automatically. See
 [automatic memory capture](docs/automatic-memory-capture.md) for the current Korean operating guide.
+The [Codex checkpoint hook](docs/checkpoint-hook.md) connects meaningful task endings to that
+importance gate without reading raw transcripts or secrets.
 This current-state section supersedes the older lifecycle note immediately below.
 
 ## 저장 구조: 자동 수집과 MCP 기록은 다릅니다
@@ -123,6 +125,14 @@ npm run check
 npm run test
 npm run validate:schema
 ```
+
+서버를 실행한 뒤 브라우저에서 `http://127.0.0.1:3000/verification`을 열면 자동 중요도
+판정, 체크포인트 훅, MCP/API/스키마 검증 근거와 현재 health 상태를 한 화면에서 확인할 수 있습니다.
+같은 화면의 Memory Inbox는 `.env`의 `SECOND_BRAIN_MCP_ACCESS_TOKEN`으로 실제 `proposed` 항목을
+요약 테이블과 10개 단위 페이지로 봅니다. 토큰은 서버에서만 사용하며 브라우저에 전달·저장되지 않습니다.
+실행 스크립트는 Windows 시스템 인증서를 사용하므로, 회사 프록시 또는 보안 소프트웨어가 사용하는
+인증서 체인도 JWKS 검증에 적용됩니다.
+코드 변경 뒤에는 `npm run verify`로 타입 검사, 자동화 테스트, 스키마 계약 검증을 다시 실행합니다.
 
 `TEST_DATABASE_URL`을 설정하면 `npm run test`가 실제 PostgreSQL 통합 테스트까지 실행합니다. 값이 없으면 해당 테스트만 건너뜁니다.
 

@@ -6,6 +6,8 @@ const environmentSchema = z.object({
   SUPABASE_JWT_ISSUER: z.string().url(),
   SUPABASE_JWT_AUDIENCE: z.string().min(1).default("authenticated"),
   MEMORY_FORGET_PREVIEW_SECRET: z.string().min(32),
+  // Used only by the loopback-only verification dashboard proxy. Do not expose it to the browser.
+  SECOND_BRAIN_MCP_ACCESS_TOKEN: z.string().min(1).optional(),
   // Keep local development private by default. Container platforms must opt in
   // to the public interface explicitly through HOST=0.0.0.0.
   HOST: z.enum(["127.0.0.1", "0.0.0.0"]).default("127.0.0.1"),

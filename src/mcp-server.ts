@@ -116,7 +116,7 @@ export const createMcpServer = (api: McpApiClient) => {
 
   server.registerTool("brain_capture_auto_memory", {
     title: "Capture important memory candidate",
-    description: "Evaluate a task decision or failure by importance, then discard it or save it as a proposed Inbox memory.",
+    description: "Evaluate a task decision or failure by importance, then discard it or save it as a proposed Inbox memory. Write text summaries in Korean, retaining only technical identifiers and API names verbatim.",
     annotations: { destructiveHint: false, idempotentHint: true },
     inputSchema: {
       idempotency_key: z.string().trim().min(16).max(200),

@@ -37,6 +37,63 @@ test("health endpoint does not require authentication", async () => {
   await app.close();
 });
 
+test("verification dashboard is public and exposes the visual check controls", async () => {
+  const unauthenticated: PrincipalVerifier = {
+    async verify() {
+      throw new Error("the verification dashboard should not authenticate");
+    },
+  };
+  const app = buildApp({ database, verifier: unauthenticated, forgetPreviewSecret: "test-forget-preview-secret-at-least-32" });
+  const response = await app.inject({ method: "GET", url: "/verification" });
+  assert.equal(response.statusCode, 200);
+  assert.match(response.headers["content-type"] ?? "", /^text\/html/);
+  assert.equal(response.headers["cache-control"], "no-store");
+  assert.match(response.body, /자동 중요도 캡처 미리보기/);
+  assert.match(response.body, /Memory Inbox · 실제 저장된 제안/);
+  assert.doesNotMatch(response.body, /inboxToken/);
+  assert.match(response.body, /id="checkpoint-button"/);
+  await app.close();
+});
+
+test("verification Inbox proxy uses only the server-configured token", async () => {
+  const authorizations: Array<string | undefined> = [];
+  const dashboardVerifier: PrincipalVerifier = {
+    async verify(authorization) {
+      authorizations.push(authorization);
+      return { ...principal, permissions: new Set(["memory:read"]) };
+    },
+  };
+  const dashboardDatabase: Database = {
+    async transaction(_principal, action) {
+      return action({
+        async query<Row extends QueryResultRow>() {
+          return { rows: [] as Row[], rowCount: 0 };
+        },
+      });
+    },
+    async close() {},
+  };
+  const app = buildApp({
+    database: dashboardDatabase,
+    verifier: dashboardVerifier,
+    forgetPreviewSecret: "test-forget-preview-secret-at-least-32",
+    dashboardAccessToken: "server-only-dashboard-token",
+  });
+  const response = await app.inject({ method: "GET", url: "/verification/memories/inbox?limit=10" });
+  assert.equal(response.statusCode, 200, response.body);
+  assert.deepEqual(response.json().data, { items: [], next_cursor: null, total_count: 0 });
+  assert.deepEqual(authorizations, ["Bearer server-only-dashboard-token"]);
+  await app.close();
+});
+
+test("verification Inbox proxy remains disabled until its server token is configured", async () => {
+  const app = buildApp({ database, verifier, forgetPreviewSecret: "test-forget-preview-secret-at-least-32" });
+  const response = await app.inject({ method: "GET", url: "/verification/memories/inbox" });
+  assert.equal(response.statusCode, 503);
+  assert.equal(response.json().error.code, "DASHBOARD_TOKEN_NOT_CONFIGURED");
+  await app.close();
+});
+
 test("protected endpoints return the contract authentication envelope", async () => {
   const unauthenticated: PrincipalVerifier = {
     async verify() {
@@ -154,7 +211,7 @@ test("Memory Inbox parses list filters and serves the static inbox route", async
   const app = buildApp({ database: inboxDatabase, verifier: memoryReadVerifier, forgetPreviewSecret: "test-forget-preview-secret-at-least-32" });
   const response = await app.inject({ method: "GET", url: "/v1/memories/inbox?limit=2&kinds=learning&tags=inbox" });
   assert.equal(response.statusCode, 200, response.body);
-  assert.deepEqual(response.json().data, { items: [], next_cursor: null });
+  assert.deepEqual(response.json().data, { items: [], next_cursor: null, total_count: 0 });
   assert.deepEqual(calls[0], [principal.userId, [], ["learning"], ["inbox"], null, null, null, 3]);
   await app.close();
 });

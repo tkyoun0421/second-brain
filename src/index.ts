@@ -18,6 +18,7 @@ const app = buildApp({
     audience: config.SUPABASE_JWT_AUDIENCE,
   }),
   forgetPreviewSecret: config.MEMORY_FORGET_PREVIEW_SECRET,
+  ...(config.SECOND_BRAIN_MCP_ACCESS_TOKEN ? { dashboardAccessToken: config.SECOND_BRAIN_MCP_ACCESS_TOKEN } : {}),
 });
 
 const close = async () => {

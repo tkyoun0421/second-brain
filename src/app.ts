@@ -6,6 +6,7 @@ import type { PrincipalVerifier } from "./auth.js";
 import type { Database } from "./database.js";
 import { asApiError, ApiError, invalidArgument } from "./errors.js";
 import { hashRequest } from "./hash.js";
+import { verificationDashboardHtml } from "./verification-dashboard.js";
 import {
   abandonIdempotency,
   claimIdempotency,
@@ -61,7 +62,11 @@ export interface AppDependencies {
   database: Database;
   verifier: PrincipalVerifier;
   forgetPreviewSecret: string;
+  dashboardAccessToken?: string;
 }
+
+const isLoopbackAddress = (address: string) =>
+  address === "127.0.0.1" || address === "::1" || address === "::ffff:127.0.0.1";
 
 const numericPathId = (value: string, name: string) => {
   if (!/^\d+$/.test(value)) throw invalidArgument(`${name}는 숫자 ID여야 합니다.`);
@@ -100,7 +105,7 @@ const sendIdempotent = (
   return response.send(outcome.response.body);
 };
 
-export const buildApp = ({ database, verifier, forgetPreviewSecret }: AppDependencies): FastifyInstance => {
+export const buildApp = ({ database, verifier, forgetPreviewSecret, dashboardAccessToken }: AppDependencies): FastifyInstance => {
   const app = Fastify({
     bodyLimit: 4 * 1024 * 1024,
     logger: { level: "error" },
@@ -108,7 +113,11 @@ export const buildApp = ({ database, verifier, forgetPreviewSecret }: AppDepende
   });
 
   app.addHook("preHandler", async (request) => {
-    if (request.routeOptions.url === "/v1/health") return;
+    if (
+      request.routeOptions.url === "/v1/health"
+      || request.routeOptions.url === "/verification"
+      || request.routeOptions.url === "/verification/memories/inbox"
+    ) return;
     request.principal = await verifier.verify(request.headers.authorization);
   });
 
@@ -136,6 +145,31 @@ export const buildApp = ({ database, verifier, forgetPreviewSecret }: AppDepende
   });
 
   app.get("/v1/health", async (request) => ({ request_id: request.id, data: { status: "ok" } }));
+
+  app.get("/verification", async (_request, reply) => reply
+    .type("text/html; charset=utf-8")
+    .header("cache-control", "no-store")
+    .send(verificationDashboardHtml()));
+
+  app.get("/verification/memories/inbox", async (request, reply) => {
+    if (!isLoopbackAddress(request.ip)) {
+      throw new ApiError({ statusCode: 403, code: "FORBIDDEN", message: "The verification data proxy is only available on loopback." });
+    }
+    if (!dashboardAccessToken) {
+      return reply.code(503).send({
+        error: {
+          code: "DASHBOARD_TOKEN_NOT_CONFIGURED",
+          message: "The dashboard access token is not configured.",
+          request_id: request.id,
+          retryable: false,
+        },
+      });
+    }
+    const input = memoryInboxQuerySchema.parse(request.query);
+    const principal = await verifier.verify(`Bearer ${dashboardAccessToken}`);
+    reply.header("cache-control", "no-store");
+    return { request_id: request.id, data: await listMemoryInbox(database, principal, input) };
+  });
 
   app.get<{ Params: { github_repository_id: string } }>(
     "/v1/github/repositories/:github_repository_id/checkpoint",
