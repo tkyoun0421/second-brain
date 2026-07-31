@@ -121,6 +121,8 @@ const confirmationSchema = z.object({
   confirmed_at: timestamp,
 });
 
+const memoryKindSchema = z.enum(["learning", "decision", "preference", "failure", "procedure", "constraint"]);
+
 const memoryInputSchema = z.object({
   statement: nonBlank.max(2_000),
   rationale: z.string().max(10_000).nullable().optional(),
@@ -151,6 +153,92 @@ export const failureSchema = memoryInputSchema.extend({
     resolution: z.string().max(10_000).nullable().optional(),
     verification: z.array(nonBlank.max(10_000)).max(50),
   }),
+});
+
+const memoryReferenceSchema = z.string().regex(/^\d+$/, "memory ID must be a positive integer string");
+
+export const agentRunFinishSchema = z.object({
+  session_id: nonBlank.max(500),
+  agent: nonBlank.max(255),
+  repository_id: z.string().regex(/^\d+$/).nullable().optional(),
+  goal: nonBlank.max(10_000),
+  started_at: timestamp,
+  finished_at: timestamp,
+  result: z.enum(["succeeded", "partial", "failed", "cancelled"]),
+  summary: z.string().max(10_000).nullable().optional(),
+  changed_files: z.array(z.object({
+    path: nonBlank.max(2_000).refine((path) => !path.startsWith("/") && !path.includes("..") && !/^[a-zA-Z]:/.test(path), "path must be repository-relative"),
+    operation: z.enum(["created", "modified", "deleted"]).optional(),
+  })).max(1_000),
+  commands_or_actions: z.array(z.object({
+    kind: nonBlank.max(100),
+    summary: nonBlank.max(10_000),
+  })).max(1_000),
+  verification: z.array(z.object({
+    kind: nonBlank.max(100),
+    name: z.string().max(500).optional(),
+    status: z.enum(["passed", "failed", "skipped", "not_run"]),
+    summary: nonBlank.max(10_000),
+    source_id: z.string().max(1_000).optional(),
+  })).max(1_000),
+  used_memories: z.array(z.object({
+    memory_id: memoryReferenceSchema,
+    rating: z.enum(["helpful", "irrelevant", "outdated", "incorrect", "conflicting"]),
+  })).max(1_000).default([]),
+  created_memory_ids: z.array(memoryReferenceSchema).max(1_000).default([]),
+  failure_ids: z.array(memoryReferenceSchema).max(1_000).default([]),
+}).superRefine((input, context) => {
+  if (input.finished_at < input.started_at) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["finished_at"], message: "finished_at must not precede started_at" });
+  }
+});
+
+export const memoryConfirmSchema = z.object({
+  expected_revision: z.number().int().positive(),
+  confirmation: confirmationSchema.refine((value) => value.origin === "explicit_user", "confirmation must originate from an explicit user action"),
+});
+
+const replacementSchema = z.object({
+  kind: memoryKindSchema,
+  statement: nonBlank.max(2_000),
+  rationale: z.string().max(10_000).nullable().optional(),
+  scope: scopeSchema,
+  confidence: z.number().min(0).max(1),
+  sources: z.array(sourceSchema).min(1),
+  valid_from: timestamp,
+  valid_until: timestamp.nullable(),
+  tags: z.array(nonBlank.max(100)).max(30),
+  failure: z.object({
+    resolution_status: z.enum(["observed", "investigating", "hypothesis", "resolved", "verified", "recurring"]),
+    symptom: nonBlank.max(10_000),
+    environment: z.string().max(10_000).nullable().optional(),
+    attempts: z.array(nonBlank.max(10_000)).max(50),
+    cause_or_hypothesis: z.string().max(10_000).nullable().optional(),
+    resolution: z.string().max(10_000).nullable().optional(),
+    verification: z.array(nonBlank.max(10_000)).max(50),
+  }).optional(),
+}).superRefine((input, context) => {
+  if (input.valid_until && input.valid_until <= input.valid_from) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["valid_until"], message: "valid_until must follow valid_from" });
+  }
+  if (input.kind === "failure" && !input.failure) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["failure"], message: "failure details are required for failure memories" });
+  }
+  if (input.kind !== "failure" && input.failure) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["failure"], message: "failure details are only valid for failure memories" });
+  }
+});
+
+export const memorySupersedeSchema = z.object({
+  expected_revision: z.number().int().positive(),
+  status_intent: z.enum(["proposed", "confirmed"]),
+  replacement: replacementSchema,
+  confirmation: confirmationSchema,
+}).superRefine((input, context) => {
+  const expectedOrigin = input.status_intent === "confirmed" ? "explicit_user" : "agent_inference";
+  if (input.confirmation.origin !== expectedOrigin) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["confirmation", "origin"], message: `confirmation.origin must be ${expectedOrigin}` });
+  }
 });
 
 export const contextQuerySchema = z.object({
@@ -184,3 +272,6 @@ export type DecisionInput = z.infer<typeof decisionSchema>;
 export type FailureInput = z.infer<typeof failureSchema>;
 export type ContextQueryInput = z.infer<typeof contextQuerySchema>;
 export type MemorySearchInput = z.infer<typeof memorySearchSchema>;
+export type AgentRunFinishInput = z.infer<typeof agentRunFinishSchema>;
+export type MemoryConfirmInput = z.infer<typeof memoryConfirmSchema>;
+export type MemorySupersedeInput = z.infer<typeof memorySupersedeSchema>;

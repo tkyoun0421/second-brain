@@ -17,9 +17,12 @@ import type { Principal } from "./principal.js";
 import {
   decisionSchema,
   failureSchema,
+  agentRunFinishSchema,
   heartbeatSchema,
   contextQuerySchema,
+  memoryConfirmSchema,
   memorySearchSchema,
+  memorySupersedeSchema,
   syncCompleteSchema,
   syncItemsSchema,
   syncStartSchema,
@@ -28,12 +31,15 @@ import { getMemoryDetail, queryContext, searchMemories } from "./read-services.j
 import { rejectSensitiveData } from "./sensitive.js";
 import {
   completeSyncRun,
+  confirmMemory,
   createDecision,
   createFailure,
+  finishAgentRun,
   getCheckpoint,
   heartbeatSyncRun,
   processSyncItem,
   startSyncRun,
+  supersedeMemory,
 } from "./services.js";
 
 declare module "fastify" {
@@ -234,6 +240,35 @@ export const buildApp = ({ database, verifier }: AppDependencies): FastifyInstan
     rejectSensitiveData(input);
     return sendIdempotent(reply, await createFailure(
       database, principal, request.id, idempotencyKeyOf(request), hashRequest(input), input,
+    ));
+  });
+
+  app.post("/v1/agent-runs/finish", async (request, reply) => {
+    const principal = principalOf(request);
+    const input = agentRunFinishSchema.parse(bodyOf(request));
+    rejectSensitiveData(input);
+    return sendIdempotent(reply, await finishAgentRun(
+      database, principal, request.id, idempotencyKeyOf(request), hashRequest(input), input,
+    ));
+  });
+
+  app.post<{ Params: { memory_id: string } }>("/v1/memories/:memory_id/confirm", async (request, reply) => {
+    const principal = principalOf(request);
+    const input = memoryConfirmSchema.parse(bodyOf(request));
+    rejectSensitiveData(input);
+    return sendIdempotent(reply, await confirmMemory(
+      database, principal, request.id, idempotencyKeyOf(request), hashRequest(input),
+      numericPathId(request.params.memory_id, "memory_id"), input,
+    ));
+  });
+
+  app.post<{ Params: { memory_id: string } }>("/v1/memories/:memory_id/supersede", async (request, reply) => {
+    const principal = principalOf(request);
+    const input = memorySupersedeSchema.parse(bodyOf(request));
+    rejectSensitiveData(input);
+    return sendIdempotent(reply, await supersedeMemory(
+      database, principal, request.id, idempotencyKeyOf(request), hashRequest(input),
+      numericPathId(request.params.memory_id, "memory_id"), input,
     ));
   });
 

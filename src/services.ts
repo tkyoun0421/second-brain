@@ -9,8 +9,11 @@ import {
   type Principal,
 } from "./principal.js";
 import type {
+  AgentRunFinishInput,
   DecisionInput,
   FailureInput,
+  MemoryConfirmInput,
+  MemorySupersedeInput,
   SyncCompleteInput,
   SyncItem,
   SyncStartInput,
@@ -812,3 +815,301 @@ export const createFailure = (
   requestHash: string,
   input: FailureInput,
 ) => createMemory(database, principal, requestId, idempotencyKey, requestHash, input, "failure");
+
+interface MemoryTransitionRow {
+  id: string;
+  kind: "learning" | "decision" | "preference" | "failure" | "procedure" | "constraint";
+  scope_id: string;
+  status: "proposed" | "confirmed" | "verified" | "superseded" | "deprecated" | "deleted";
+  revision: string;
+  supersedes_id: string | null;
+}
+
+const getMemoryForUpdate = async (
+  client: SqlClient,
+  principal: Principal,
+  memoryId: string,
+): Promise<MemoryTransitionRow> => {
+  const result = await client.query<MemoryTransitionRow>(
+    `select id::text, kind, scope_id::text, status, revision::text, supersedes_id::text
+       from public.memories
+      where owner_id = $1 and id = $2::bigint
+      for update`,
+    [principal.userId, memoryId],
+  );
+  if (!result.rows[0]) throw notFound();
+  return result.rows[0];
+};
+
+const requireExpectedRevision = (memory: MemoryTransitionRow, expectedRevision: number) => {
+  if (Number(memory.revision) !== expectedRevision) {
+    throw conflict("memory_revision", "기억이 다른 요청으로 변경되었습니다. 최신 revision으로 다시 시도하세요.");
+  }
+};
+
+const invalidMemoryTransition = () => new ApiError({
+  statusCode: 409,
+  code: "INVALID_STATE_TRANSITION",
+  message: "현재 기억 상태에서는 요청한 전이를 수행할 수 없습니다.",
+});
+
+const insertMemoryEvidence = async (
+  client: SqlClient,
+  principal: Principal,
+  scope: ScopeResolution,
+  memoryId: string,
+  sources: ReadonlyArray<DecisionInput["sources"][number]>,
+) => {
+  for (const source of sources) {
+    const evidence = await createManualEvidence(client, principal, scope, source);
+    await client.query(
+      `insert into public.memory_evidence (
+         owner_id, memory_id, source_snapshot_id, agent_run_id, source_excerpt
+       ) values ($1, $2::bigint, $3::bigint, $4::bigint, $5)
+       on conflict do nothing`,
+      [principal.userId, memoryId, evidence.sourceSnapshotId, evidence.agentRunId, source.source_excerpt],
+    );
+  }
+};
+
+export const finishAgentRun = async (
+  database: Database,
+  principal: Principal,
+  requestId: string,
+  idempotencyKey: string,
+  requestHash: string,
+  input: AgentRunFinishInput,
+) => {
+  requirePermission(principal, "agent_run:write");
+  return executeIdempotent(
+    database,
+    principal,
+    {
+      key: idempotencyKey,
+      operation: makeOperation("/v1/agent-runs/finish"),
+      requestHash,
+      requestId,
+      audit: {
+        operation: "create",
+        targetType: "agent_run",
+        ...(input.repository_id ? { repositoryId: input.repository_id } : {}),
+        redactedInput: { result: input.result, changed_file_count: input.changed_files.length },
+      },
+    },
+    async (client) => {
+      if (input.repository_id) {
+        const repository = await client.query<RepositoryRow>(
+          "select id::text, github_node_id from public.repositories where owner_id = $1 and id = $2::bigint",
+          [principal.userId, input.repository_id],
+        );
+        if (!repository.rows[0]) throw notFound();
+        assertRepositoryAllowed(principal, repository.rows[0].github_node_id);
+      }
+
+      const run = await client.query<{ id: string; created_at: string }>(
+        `insert into public.agent_runs (
+           owner_id, session_id, idempotency_key, agent_name, repository_id, goal, status,
+           result_summary, changed_files, commands_or_actions, verification, started_at, finished_at
+         ) values ($1, $2, $3, $4, $5::bigint, $6, $7::public.agent_run_status,
+                   $8, $9::text[], $10::jsonb, $11::jsonb, $12::timestamptz, $13::timestamptz)
+         returning id::text, created_at::text`,
+        [
+          principal.userId, input.session_id, idempotencyKey, input.agent, input.repository_id ?? null,
+          input.goal, input.result, input.summary ?? null, input.changed_files.map((file) => file.path),
+          toJson(input.commands_or_actions), toJson({ items: input.verification, failure_ids: input.failure_ids }),
+          input.started_at, input.finished_at,
+        ],
+      );
+      const runRow = run.rows[0];
+      if (!runRow) throw new ApiError({ statusCode: 500, code: "INTERNAL", message: "작업 실행 기록을 저장하지 못했습니다.", retryable: true });
+
+      for (const used of input.used_memories) {
+        const linked = await client.query(
+          `insert into public.agent_run_memories (owner_id, agent_run_id, memory_id, relation, feedback)
+           select $1, $2::bigint, m.id, 'used'::public.memory_run_relation, $4::public.memory_feedback
+             from public.memories m
+            where m.owner_id = $1 and m.id = $3::bigint
+           on conflict (agent_run_id, memory_id, relation)
+           do update set feedback = excluded.feedback`,
+          [principal.userId, runRow.id, used.memory_id, used.rating],
+        );
+        if (linked.rowCount !== 1) throw notFound();
+      }
+      for (const memoryId of new Set([...input.created_memory_ids, ...input.failure_ids])) {
+        const linked = await client.query(
+          `insert into public.agent_run_memories (owner_id, agent_run_id, memory_id, relation)
+           select $1, $2::bigint, m.id, 'created'::public.memory_run_relation
+             from public.memories m
+            where m.owner_id = $1 and m.id = $3::bigint
+           on conflict do nothing`,
+          [principal.userId, runRow.id, memoryId],
+        );
+        if (linked.rowCount !== 1) throw notFound();
+      }
+
+      return {
+        statusCode: 201,
+        data: {
+          agent_run_id: runRow.id,
+          session_id: input.session_id,
+          result: input.result,
+          created_at: runRow.created_at,
+        },
+      };
+    },
+  );
+};
+
+export const confirmMemory = async (
+  database: Database,
+  principal: Principal,
+  requestId: string,
+  idempotencyKey: string,
+  requestHash: string,
+  memoryId: string,
+  input: MemoryConfirmInput,
+) => {
+  requirePermission(principal, "memory:confirm");
+  return executeIdempotent<Record<string, unknown>>(
+    database,
+    principal,
+    {
+      key: idempotencyKey,
+      operation: makeOperation("/v1/memories/{memory_id}/confirm"),
+      requestHash,
+      requestId,
+      audit: { operation: "confirm", targetType: "memory", targetIds: [memoryId], redactedInput: { expected_revision: input.expected_revision } },
+    },
+    async (client) => {
+      const memory = await getMemoryForUpdate(client, principal, memoryId);
+      requireExpectedRevision(memory, input.expected_revision);
+      if (memory.status !== "proposed") throw invalidMemoryTransition();
+
+      let supersededMemoryId: string | null = null;
+      if (memory.supersedes_id) {
+        const predecessor = await getMemoryForUpdate(client, principal, memory.supersedes_id);
+        if (predecessor.status !== "confirmed" && predecessor.status !== "verified") throw invalidMemoryTransition();
+        await client.query(
+          "update public.memories set status = 'superseded' where owner_id = $1 and id = $2::bigint",
+          [principal.userId, predecessor.id],
+        );
+        supersededMemoryId = predecessor.id;
+      }
+
+      const updated = await client.query<{ revision: string; confirmed_at: string }>(
+        `update public.memories
+            set status = 'confirmed', confirmed_at = now(),
+                details = details || jsonb_build_object('confirmation', $3::jsonb)
+          where owner_id = $1 and id = $2::bigint
+          returning revision::text, confirmed_at::text`,
+        [principal.userId, memory.id, toJson(input.confirmation)],
+      );
+      const row = updated.rows[0];
+      if (!row) throw notFound();
+      return {
+        statusCode: 200,
+        data: {
+          memory_id: memory.id,
+          status: "confirmed",
+          revision: Number(row.revision),
+          confirmed_at: row.confirmed_at,
+          superseded_memory_id: supersededMemoryId,
+        },
+      };
+    },
+  );
+};
+
+export const supersedeMemory = async (
+  database: Database,
+  principal: Principal,
+  requestId: string,
+  idempotencyKey: string,
+  requestHash: string,
+  memoryId: string,
+  input: MemorySupersedeInput,
+) => {
+  if (input.status_intent === "confirmed") requirePermission(principal, "memory:supersede");
+  else requirePermission(principal, "memory:propose");
+  return executeIdempotent<Record<string, unknown>>(
+    database,
+    principal,
+    {
+      key: idempotencyKey,
+      operation: makeOperation("/v1/memories/{memory_id}/supersede"),
+      requestHash,
+      requestId,
+      audit: { operation: "supersede", targetType: "memory", targetIds: [memoryId], redactedInput: { status_intent: input.status_intent } },
+    },
+    async (client) => {
+      const predecessor = await getMemoryForUpdate(client, principal, memoryId);
+      requireExpectedRevision(predecessor, input.expected_revision);
+      if (predecessor.status !== "confirmed" && predecessor.status !== "verified") throw invalidMemoryTransition();
+      const scope = await resolveScope(client, principal, input.replacement.scope);
+      if (predecessor.kind !== input.replacement.kind || predecessor.scope_id !== scope.scopeId) {
+        throw invalidArgument("supersede replacement must retain the existing memory kind and scope");
+      }
+      if (input.replacement.kind === "failure" && input.replacement.failure?.resolution_status === "hypothesis" && input.status_intent !== "proposed") {
+        throw invalidArgument("hypothesis failures may only be proposed");
+      }
+
+      const replacementStatus = input.status_intent;
+      const replacement = await client.query<{ id: string; revision: string }>(
+        `insert into public.memories (
+           owner_id, kind, statement, rationale, scope_id, status, confidence, valid_from,
+           valid_until, supersedes_id, confirmed_at, tags, details
+         ) values ($1, $2::public.memory_kind, $3, $4, $5::bigint, $6::public.memory_status,
+                   $7, $8::timestamptz, $9::timestamptz, $10::bigint,
+                   case when $6 = 'confirmed' then now() else null end, $11::text[], $12::jsonb)
+         returning id::text, revision::text`,
+        [
+          principal.userId, input.replacement.kind, input.replacement.statement, input.replacement.rationale ?? null,
+          scope.scopeId, replacementStatus, input.replacement.confidence, input.replacement.valid_from,
+          input.replacement.valid_until, predecessor.id, input.replacement.tags,
+          toJson({ confirmation: input.confirmation }),
+        ],
+      );
+      const replacementRow = replacement.rows[0];
+      if (!replacementRow) throw new ApiError({ statusCode: 500, code: "INTERNAL", message: "교체 기억을 저장하지 못했습니다.", retryable: true });
+
+      if (input.replacement.kind === "failure" && input.replacement.failure) {
+        const failure = input.replacement.failure;
+        await client.query(
+          `insert into public.memory_failure_details (
+             memory_id, owner_id, resolution_status, symptom, context, attempted_approaches, cause, resolution, verification
+           ) values ($1::bigint, $2, $3::public.failure_resolution_status, $4, $5, $6::jsonb, $7, $8, $9)`,
+          [
+            replacementRow.id, principal.userId, failure.resolution_status, failure.symptom,
+            failure.environment ?? null, toJson(failure.attempts), failure.cause_or_hypothesis ?? null,
+            failure.resolution ?? null, failure.verification.join("\n"),
+          ],
+        );
+      }
+      await insertMemoryEvidence(client, principal, scope, replacementRow.id, input.replacement.sources);
+
+      if (input.status_intent === "confirmed") {
+        const updated = await client.query<{ revision: string }>(
+          `update public.memories set status = 'superseded'
+            where owner_id = $1 and id = $2::bigint
+            returning revision::text`,
+          [principal.userId, predecessor.id],
+        );
+        return {
+          statusCode: 201,
+          data: {
+            superseded: { memory_id: predecessor.id, status: "superseded", revision: Number(updated.rows[0]?.revision) },
+            replacement: { memory_id: replacementRow.id, status: "confirmed", revision: Number(replacementRow.revision) },
+          },
+        };
+      }
+      return {
+        statusCode: 201,
+        data: {
+          existing: { memory_id: predecessor.id, status: predecessor.status, revision: Number(predecessor.revision) },
+          replacement: { memory_id: replacementRow.id, status: "proposed", revision: Number(replacementRow.revision) },
+          transition: "proposal_created",
+        },
+      };
+    },
+  );
+};
