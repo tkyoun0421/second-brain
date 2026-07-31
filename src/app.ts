@@ -80,6 +80,15 @@ const idempotencyKeyOf = (request: FastifyRequest) => {
   return validateIdempotencyKey(Array.isArray(value) ? value[0] : value);
 };
 
+const safeErrorMetadata = (error: unknown) => {
+  const candidate = error && typeof error === "object" ? error as Record<string, unknown> : {};
+  return {
+    error_name: error instanceof Error ? error.name : "UnknownError",
+    ...(typeof candidate.code === "string" ? { error_code: candidate.code } : {}),
+    ...(typeof candidate.constraint === "string" ? { database_constraint: candidate.constraint } : {}),
+  };
+};
+
 const sendIdempotent = (
   reply: { code(statusCode: number): { header(name: string, value: string): unknown; send(body: unknown): unknown } },
   outcome: { replayed: boolean; response: { statusCode: number; body: Record<string, unknown> } },
@@ -92,7 +101,7 @@ const sendIdempotent = (
 export const buildApp = ({ database, verifier, forgetPreviewSecret }: AppDependencies): FastifyInstance => {
   const app = Fastify({
     bodyLimit: 4 * 1024 * 1024,
-    logger: false,
+    logger: { level: "error" },
     genReqId: () => randomUUID(),
   });
 
@@ -103,6 +112,13 @@ export const buildApp = ({ database, verifier, forgetPreviewSecret }: AppDepende
 
   app.setErrorHandler((error, request, reply) => {
     const apiError = asApiError(error);
+    if (apiError.statusCode >= 500) {
+      request.log.error({
+        request_id: request.id,
+        route: request.routeOptions.url,
+        ...safeErrorMetadata(error),
+      }, "request failed");
+    }
     if (apiError.headers) {
       for (const [name, value] of Object.entries(apiError.headers)) reply.header(name, value);
     }

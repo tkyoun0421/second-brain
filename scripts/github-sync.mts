@@ -234,8 +234,14 @@ const requestJson = async <T>(
         ? (body as { error?: { code?: unknown; retryable?: unknown } }).error
         : undefined;
       const code = typeof error?.code === "string" ? error.code : `HTTP_${response.status}`;
+      const requestId = body && typeof body === "object" && "request_id" in body
+        ? (body as { request_id?: unknown }).request_id
+        : undefined;
       const retryable = error?.retryable === true || githubRateLimited(response) || response.status >= 500;
       if (!retryable || attempt >= options.maxRetries) {
+        if (typeof requestId === "string" && /^[0-9a-f-]{36}$/i.test(requestId)) {
+          throw new SyncError(code, retryable, `${options.label} request_id=${requestId}`);
+        }
         throw new SyncError(code, retryable, `${options.label} 요청이 실패했습니다 (HTTP ${response.status}).`);
       }
     } catch (error) {
