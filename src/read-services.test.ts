@@ -25,6 +25,9 @@ const memory = (id: string, createdAt: string) => ({
   valid_from: createdAt,
   valid_until: null,
   tags: ["inbox"],
+  importance_score: "8",
+  importance_reasons: ["reusable"],
+  capture_trigger: "agent_checkpoint",
   scope_type: "global" as const,
   scope_key: "global",
   repository_node_id: null,
@@ -33,7 +36,7 @@ const memory = (id: string, createdAt: string) => ({
   supersedes_id: null,
 });
 
-test("Memory Inbox lists only proposed memories with owner-scoped created-at pagination", async () => {
+test("Memory Inbox lists only proposed memories with owner-scoped importance pagination", async () => {
   const queries: Array<{ text: string; values: readonly unknown[] | undefined }> = [];
   const client: SqlClient = {
     async query<Row extends QueryResultRow>(text: string, values?: readonly unknown[]) {
@@ -58,12 +61,12 @@ test("Memory Inbox lists only proposed memories with owner-scoped created-at pag
 
   assert.deepEqual(result.items.map((item) => item.id), ["9"]);
   assert.deepEqual(JSON.parse(Buffer.from(result.next_cursor ?? "", "base64url").toString("utf8")), {
-    created_at: "2026-07-31T02:00:00.000Z", id: "9",
+    importance_score: 8, created_at: "2026-07-31T02:00:00.000Z", id: "9",
   });
   assert.match(queries[0]?.text ?? "", /m\.owner_id = \$1/);
   assert.match(queries[0]?.text ?? "", /m\.status = 'proposed'/);
-  assert.match(queries[0]?.text ?? "", /order by m\.created_at desc, m\.id desc/);
+  assert.match(queries[0]?.text ?? "", /order by coalesce\(m\.importance_score, -1\) desc, m\.created_at desc, m\.id desc/);
   assert.deepEqual(queries[0]?.values, [
-    principal.userId, ["R_repo"], ["learning"], ["inbox"], null, null, 2,
+    principal.userId, ["R_repo"], ["learning"], ["inbox"], null, null, null, 2,
   ]);
 });

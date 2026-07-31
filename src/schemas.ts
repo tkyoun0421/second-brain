@@ -157,6 +157,48 @@ export const failureSchema = memoryInputSchema.extend({
   }),
 });
 
+const captureSignalsSchema = z.object({
+  reusability: z.number().int().min(0).max(3),
+  impact: z.number().int().min(0).max(3),
+  scope: z.number().int().min(0).max(2),
+  evidence: z.number().int().min(0).max(2),
+  noise_penalty: z.number().int().min(0).max(3),
+});
+
+const captureCandidateBase = z.object({
+  statement: nonBlank.max(2_000),
+  rationale: z.string().max(10_000).nullable(),
+  scope: scopeSchema,
+  tags: z.array(nonBlank.max(100)).max(30),
+  trigger: z.enum(["agent_checkpoint", "user_choice", "error_resolution"]),
+  source: sourceSchema,
+  occurred_at: timestamp,
+  signals: captureSignalsSchema,
+});
+
+const captureFailureDetailSchema = z.object({
+  resolution_status: z.enum(["observed", "investigating", "hypothesis", "resolved", "verified", "recurring"]),
+  symptom: nonBlank.max(10_000),
+  environment: z.string().max(10_000).nullable(),
+  attempts: z.array(nonBlank.max(10_000)).max(50),
+  cause_or_hypothesis: z.string().max(10_000).nullable(),
+  resolution: z.string().max(10_000).nullable(),
+  verification: z.array(nonBlank.max(10_000)).max(50),
+});
+
+export const memoryCaptureSchema = z.object({
+  candidate: z.discriminatedUnion("kind", [
+    captureCandidateBase.extend({
+      kind: z.literal("decision"),
+      decision: z.object({ alternatives: z.array(nonBlank.max(500)).max(50) }),
+    }),
+    captureCandidateBase.extend({
+      kind: z.literal("failure"),
+      failure: captureFailureDetailSchema,
+    }),
+  ]),
+});
+
 const memoryReferenceSchema = z.string().regex(/^\d+$/, "memory ID must be a positive integer string");
 
 export const agentRunFinishSchema = z.object({
@@ -299,6 +341,7 @@ export type SyncItem = z.infer<typeof syncItemSchema>;
 export type SyncCompleteInput = z.infer<typeof syncCompleteSchema>;
 export type DecisionInput = z.infer<typeof decisionSchema>;
 export type FailureInput = z.infer<typeof failureSchema>;
+export type MemoryCaptureInput = z.infer<typeof memoryCaptureSchema>;
 export type ContextQueryInput = z.infer<typeof contextQuerySchema>;
 export type MemorySearchInput = z.infer<typeof memorySearchSchema>;
 export type MemoryInboxQueryInput = z.infer<typeof memoryInboxQuerySchema>;

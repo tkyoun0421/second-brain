@@ -14,6 +14,9 @@ interface MemoryRow {
   valid_from: string;
   valid_until: string | null;
   tags: string[];
+  importance_score: string | null;
+  importance_reasons: string[];
+  capture_trigger: string | null;
   scope_type: "global" | "organization" | "repository" | "project" | "path" | "task";
   scope_key: string;
   repository_node_id: string | null;
@@ -45,6 +48,7 @@ const visibleMemorySql = `
 const visibleMemoryColumns = `
   m.id::text, m.kind::text, m.statement, m.rationale, m.status::text, m.confidence::text,
   m.revision::text, m.valid_from::text, m.valid_until::text, m.tags,
+  m.importance_score::text, m.importance_reasons, m.capture_trigger,
   s.scope_type::text, s.scope_key,
   coalesce(scope_repository.github_node_id, project_repository.github_node_id) as repository_node_id,
   m.created_at::text, m.updated_at::text, m.supersedes_id::text
@@ -62,6 +66,13 @@ const memorySummary = (memory: MemoryRow, sources: SourceRef[]) => ({
   status: memory.status,
   scope: { type: memory.scope_type, id: memory.scope_key },
   source_refs: sources.map(({ source_type, source_id }) => ({ source_type, source_id })),
+  ...(memory.importance_score === null ? {} : {
+    importance: {
+      score: Number(memory.importance_score),
+      reasons: memory.importance_reasons,
+      trigger: memory.capture_trigger,
+    },
+  }),
 });
 
 const getSources = async (
@@ -123,18 +134,22 @@ const nextCursor = (memory: MemoryRow | undefined) => memory
   : null;
 
 const parseInboxCursor = (cursor: string | null) => {
-  if (!cursor) return { createdAt: null, id: null };
+  if (!cursor) return { importanceScore: null, createdAt: null, id: null };
   try {
-    const parsed = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8")) as { created_at?: unknown; id?: unknown };
-    if (typeof parsed.created_at !== "string" || !/^\d+$/.test(String(parsed.id))) throw new Error("invalid");
-    return { createdAt: parsed.created_at, id: String(parsed.id) };
+    const parsed = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8")) as { importance_score?: unknown; created_at?: unknown; id?: unknown };
+    if (typeof parsed.importance_score !== "number" || !Number.isInteger(parsed.importance_score) || parsed.importance_score < -1 || parsed.importance_score > 10 || typeof parsed.created_at !== "string" || !/^\d+$/.test(String(parsed.id))) throw new Error("invalid");
+    return { importanceScore: parsed.importance_score, createdAt: parsed.created_at, id: String(parsed.id) };
   } catch {
     throw invalidArgument("cursor 형식이 올바르지 않습니다.");
   }
 };
 
 const nextInboxCursor = (memory: MemoryRow | undefined) => memory
-  ? Buffer.from(JSON.stringify({ created_at: memory.created_at, id: memory.id }), "utf8").toString("base64url")
+  ? Buffer.from(JSON.stringify({
+    importance_score: memory.importance_score === null ? -1 : Number(memory.importance_score),
+    created_at: memory.created_at,
+    id: memory.id,
+  }), "utf8").toString("base64url")
   : null;
 
 export const queryContext = async (
@@ -258,12 +273,12 @@ export const listMemoryInbox = async (
         and m.status = 'proposed'
         and m.kind = any($3::public.memory_kind[])
         and (cardinality($4::text[]) = 0 or m.tags && $4::text[])
-        and ($5::timestamptz is null or (m.created_at, m.id) < ($5::timestamptz, $6::bigint))
-      order by m.created_at desc, m.id desc
-      limit $7`,
+        and ($5::smallint is null or (coalesce(m.importance_score, -1), m.created_at, m.id) < ($5::smallint, $6::timestamptz, $7::bigint))
+      order by coalesce(m.importance_score, -1) desc, m.created_at desc, m.id desc
+      limit $8`,
     [
       principal.userId, [...principal.repositoryNodeIds], kinds, input.tags ?? [],
-      cursor.createdAt, cursor.id, input.limit + 1,
+      cursor.importanceScore, cursor.createdAt, cursor.id, input.limit + 1,
     ],
   );
   const hasMore = result.rows.length > input.limit;
@@ -318,6 +333,13 @@ export const getMemoryDetail = async (
       status: memory.status, confidence: Number(memory.confidence),
       scope: { type: memory.scope_type, id: memory.scope_key },
       valid_from: memory.valid_from, valid_until: memory.valid_until, tags: memory.tags,
+      ...(memory.importance_score === null ? {} : {
+        capture: {
+          importance_score: Number(memory.importance_score),
+          importance_reasons: memory.importance_reasons,
+          trigger: memory.capture_trigger,
+        },
+      }),
       revision: Number(memory.revision), created_at: memory.created_at, updated_at: memory.updated_at,
     },
     sources: sourceMap.get(memory.id) ?? [],

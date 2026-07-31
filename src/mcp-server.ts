@@ -114,6 +114,57 @@ export const createMcpServer = (api: McpApiClient) => {
     inputSchema: { memory_id: memoryId, include_source_excerpt: z.boolean().default(true), include_history: z.boolean().default(true) },
   }, (input) => apiResult(() => api.get(`/v1/memories/${input.memory_id}`)));
 
+  server.registerTool("brain_capture_auto_memory", {
+    title: "Capture important memory candidate",
+    description: "Evaluate a task decision or failure by importance, then discard it or save it as a proposed Inbox memory.",
+    annotations: { destructiveHint: false, idempotentHint: true },
+    inputSchema: {
+      idempotency_key: z.string().trim().min(16).max(200),
+      kind: z.enum(["decision", "failure"]),
+      statement: z.string().trim().min(1).max(2_000),
+      rationale: z.string().max(10_000).nullable(),
+      scope,
+      tags: z.array(z.string().trim().min(1).max(100)).max(30).default([]),
+      trigger: z.enum(["agent_checkpoint", "user_choice", "error_resolution"]),
+      source,
+      occurred_at: timestamp.default(() => new Date().toISOString()),
+      signals: z.object({
+        reusability: z.number().int().min(0).max(3), impact: z.number().int().min(0).max(3),
+        scope: z.number().int().min(0).max(2), evidence: z.number().int().min(0).max(2),
+        noise_penalty: z.number().int().min(0).max(3),
+      }),
+      decision: z.object({ alternatives: z.array(z.string().trim().min(1).max(500)).max(50) }).optional(),
+      failure: z.object({
+        resolution_status: z.enum(["observed", "investigating", "hypothesis", "resolved", "verified", "recurring"]),
+        symptom: z.string().trim().min(1).max(10_000), environment: z.string().max(10_000).nullable(),
+        attempts: z.array(z.string().trim().min(1).max(10_000)).max(50),
+        cause_or_hypothesis: z.string().max(10_000).nullable(), resolution: z.string().max(10_000).nullable(),
+        verification: z.array(z.string().max(10_000)).max(50),
+      }).optional(),
+    },
+  }, (input) => apiResult(async () => {
+    if (input.kind === "decision" && !input.decision) {
+      throw new McpApiError("INVALID_ARGUMENT", "decision is required when kind is decision.", false);
+    }
+    if (input.kind === "failure" && !input.failure) {
+      throw new McpApiError("INVALID_ARGUMENT", "failure is required when kind is failure.", false);
+    }
+    return api.post("/v1/memories/capture", {
+      candidate: {
+        kind: input.kind,
+        statement: input.statement,
+        rationale: input.rationale,
+        scope: input.scope,
+        tags: input.tags,
+        trigger: input.trigger,
+        source: toApiSource(input.source),
+        occurred_at: input.occurred_at,
+        signals: input.signals,
+        ...(input.kind === "decision" ? { decision: input.decision } : { failure: input.failure }),
+      },
+    }, input.idempotency_key);
+  }));
+
   server.registerTool("brain_save_decision", {
     title: "Save decision", description: "Store a proposed or explicitly user-confirmed decision.",
     annotations: { destructiveHint: false, idempotentHint: true },

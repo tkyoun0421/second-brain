@@ -21,6 +21,7 @@ import {
   heartbeatSchema,
   contextQuerySchema,
   memoryConfirmSchema,
+  memoryCaptureSchema,
   memoryForgetPreviewSchema,
   memoryForgetSchema,
   memoryInboxQuerySchema,
@@ -35,6 +36,7 @@ import { getMemoryDetail, listMemoryInbox, queryContext, searchMemories } from "
 import { rejectSensitiveData } from "./sensitive.js";
 import {
   completeSyncRun,
+  captureMemory,
   reconcileSyncRun,
   confirmMemory,
   createDecision,
@@ -280,6 +282,15 @@ export const buildApp = ({ database, verifier, forgetPreviewSecret }: AppDepende
     const input = failureSchema.parse(bodyOf(request));
     rejectSensitiveData(input);
     return sendIdempotent(reply, await createFailure(
+      database, principal, request.id, idempotencyKeyOf(request), hashRequest(input), input,
+    ));
+  });
+
+  app.post("/v1/memories/capture", async (request, reply) => {
+    const principal = principalOf(request);
+    const input = memoryCaptureSchema.parse(bodyOf(request));
+    rejectSensitiveData(input);
+    return sendIdempotent(reply, await captureMemory(
       database, principal, request.id, idempotencyKeyOf(request), hashRequest(input), input,
     ));
   });

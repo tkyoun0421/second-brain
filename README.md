@@ -1,5 +1,13 @@
 # Second Brain
 
+## Automatic importance capture (current)
+
+At an agent task checkpoint, `brain_capture_auto_memory` scores decision and failure candidates.
+Scores below 4 are discarded without a database write; scores 4 or above are saved as `proposed`
+Inbox items. Importance never changes a memory to `confirmed` or `verified` automatically. See
+[automatic memory capture](docs/automatic-memory-capture.md) for the current Korean operating guide.
+This current-state section supersedes the older lifecycle note immediately below.
+
 ## 저장 구조: 자동 수집과 MCP 기록은 다릅니다
 
 ### 핵심 답변

@@ -2,6 +2,12 @@ import type { SqlClient, Database } from "./database.js";
 import { ApiError, invalidArgument } from "./errors.js";
 import { canonicalJson, sha256 } from "./hash.js";
 import {
+  assessCaptureCandidate,
+  toCapturedMemory,
+  type AutomaticCaptureCandidate,
+  type CapturedMemory,
+} from "./memory-capture.js";
+import {
   createForgetPreviewToken,
   invalidForgetPreviewToken,
   verifyForgetPreviewToken,
@@ -18,6 +24,7 @@ import type {
   AgentRunFinishInput,
   DecisionInput,
   FailureInput,
+  MemoryCaptureInput,
   MemoryConfirmInput,
   MemoryForgetInput,
   MemoryForgetPreviewInput,
@@ -825,6 +832,50 @@ const validateMemoryInput = (
   }
 };
 
+interface MemoryCreationOptions {
+  operationPath?: string;
+  automaticCapture?: CapturedMemory["capture"];
+}
+
+const captureCandidate = (input: MemoryCaptureInput): AutomaticCaptureCandidate => ({
+  ...input.candidate,
+  signals: input.candidate.signals as AutomaticCaptureCandidate["signals"],
+});
+
+const toMemoryInput = (captured: CapturedMemory): DecisionInput | FailureInput => {
+  if (captured.kind === "decision") {
+    return {
+      statement: captured.statement,
+      rationale: captured.rationale,
+      scope: captured.scope,
+      status: captured.status,
+      confidence: captured.confidence,
+      sources: captured.sources,
+      confirmation: captured.confirmation,
+      valid_from: captured.valid_from,
+      valid_until: captured.valid_until,
+      tags: captured.tags,
+      decision: captured.decision ?? { alternatives: [], decided_at: captured.valid_from },
+    };
+  }
+  if (!captured.failure) {
+    throw new ApiError({ statusCode: 500, code: "INTERNAL", message: "Automatic failure capture was incomplete." });
+  }
+  return {
+    statement: captured.statement,
+    rationale: captured.rationale,
+    scope: captured.scope,
+    status: captured.status,
+    confidence: captured.confidence,
+    sources: captured.sources,
+    confirmation: captured.confirmation,
+    valid_from: captured.valid_from,
+    valid_until: captured.valid_until,
+    tags: captured.tags,
+    failure: captured.failure,
+  };
+};
+
 const createMemory = async (
   database: Database,
   principal: Principal,
@@ -833,39 +884,92 @@ const createMemory = async (
   requestHash: string,
   input: DecisionInput | FailureInput,
   kind: "decision" | "failure",
+  options: MemoryCreationOptions = {},
 ) => {
   validateMemoryInput(principal, input, kind === "failure");
-  return executeIdempotent(
+  return executeIdempotent<Record<string, unknown>>(
     database,
     principal,
     {
       key: idempotencyKey,
-      operation: makeOperation(kind === "decision" ? "/v1/memories/decisions" : "/v1/memories/failures"),
+      operation: makeOperation(options.operationPath ?? (kind === "decision" ? "/v1/memories/decisions" : "/v1/memories/failures")),
       requestHash,
       requestId,
-      audit: { operation: "create", targetType: "memory", redactedInput: { kind, status: input.status, source_count: input.sources.length } },
+      audit: {
+        operation: "create",
+        targetType: "memory",
+        redactedInput: {
+          kind,
+          status: input.status,
+          source_count: input.sources.length,
+          ...(options.automaticCapture ? {
+            automatic_capture: true,
+            importance_score: options.automaticCapture.importance_score,
+            capture_trigger: options.automaticCapture.trigger,
+          } : {}),
+        },
+      },
     },
     async (client) => {
       const scope = await resolveScope(client, principal, input.scope);
       const details = kind === "decision"
         ? { decision: (input as DecisionInput).decision, confirmation: input.confirmation ?? null }
         : { failure: (input as FailureInput).failure, confirmation: input.confirmation ?? null };
+      const storedDetails = options.automaticCapture ? { ...details, capture: options.automaticCapture } : details;
       const memory = await client.query<{ id: string; revision: string; created_at: string; confirmed_at: string | null }>(
         `insert into public.memories (
            owner_id, kind, statement, rationale, scope_id, status, confidence,
-           valid_from, valid_until, confirmed_at, tags, details
+           valid_from, valid_until, confirmed_at, tags, details,
+           importance_score, importance_reasons, capture_trigger, auto_capture_key
          ) values ($1, $2::public.memory_kind, $3, $4, $5::bigint, $6::public.memory_status,
                    $7, $8::timestamptz, $9::timestamptz,
                    case when $6 in ('confirmed', 'verified') then now() else null end,
-                   $10::text[], $11::jsonb)
+                   $10::text[], $11::jsonb, $12::smallint, $13::text[], $14, $15)
+         on conflict (owner_id, auto_capture_key) where auto_capture_key is not null
+         do nothing
          returning id::text, revision::text, created_at::text, confirmed_at::text`,
         [
           principal.userId, kind, input.statement, input.rationale ?? null, scope.scopeId,
           input.status, input.confidence, input.valid_from, input.valid_until,
-          input.tags, toJson(details),
+          input.tags, toJson(storedDetails),
+          options.automaticCapture?.importance_score ?? null,
+          options.automaticCapture?.importance_reasons ?? [],
+          options.automaticCapture?.trigger ?? null,
+          options.automaticCapture?.dedupe_key ?? null,
         ],
       );
       const memoryRow = memory.rows[0];
+      if (!memoryRow && options.automaticCapture) {
+        const existing = await client.query<{ id: string; revision: string; created_at: string; confirmed_at: string | null; status: string }>(
+          `select id::text, revision::text, created_at::text, confirmed_at::text, status::text
+             from public.memories
+            where owner_id = $1 and auto_capture_key = $2`,
+          [principal.userId, options.automaticCapture.dedupe_key],
+        );
+        const existingMemory = existing.rows[0];
+        if (!existingMemory) {
+          throw new ApiError({ statusCode: 500, code: "INTERNAL", message: "Automatic memory de-duplication could not be completed.", retryable: true });
+        }
+        return {
+          statusCode: 200,
+          data: {
+            outcome: "duplicate" as const,
+            importance: {
+              importance_score: options.automaticCapture.importance_score,
+              reasons: options.automaticCapture.importance_reasons,
+              policy_version: options.automaticCapture.policy_version,
+            },
+            memory: {
+              id: existingMemory.id,
+              kind,
+              status: existingMemory.status,
+              revision: Number(existingMemory.revision),
+              created_at: existingMemory.created_at,
+              confirmed_at: existingMemory.confirmed_at,
+            },
+          },
+        };
+      }
       if (!memoryRow) throw new ApiError({ statusCode: 500, code: "INTERNAL", message: "기억을 저장하지 못했습니다.", retryable: true });
       if (kind === "failure") {
         const failure = (input as FailureInput).failure;
@@ -891,18 +995,25 @@ const createMemory = async (
           [principal.userId, memoryRow.id, evidence.sourceSnapshotId, evidence.agentRunId, source.source_excerpt],
         );
       }
+      const memoryData = {
+        id: memoryRow.id,
+        kind,
+        status: input.status,
+        revision: Number(memoryRow.revision),
+        created_at: memoryRow.created_at,
+        confirmed_at: memoryRow.confirmed_at,
+      };
       return {
         statusCode: 201,
-        data: {
-          memory: {
-            id: memoryRow.id,
-            kind,
-            status: input.status,
-            revision: Number(memoryRow.revision),
-            created_at: memoryRow.created_at,
-            confirmed_at: memoryRow.confirmed_at,
+        data: options.automaticCapture ? {
+          outcome: "stored" as const,
+          importance: {
+            importance_score: options.automaticCapture.importance_score,
+            reasons: options.automaticCapture.importance_reasons,
+            policy_version: options.automaticCapture.policy_version,
           },
-        },
+          memory: memoryData,
+        } : { memory: memoryData },
       };
     },
   );
@@ -925,6 +1036,49 @@ export const createFailure = (
   requestHash: string,
   input: FailureInput,
 ) => createMemory(database, principal, requestId, idempotencyKey, requestHash, input, "failure");
+
+export const captureMemory = async (
+  database: Database,
+  principal: Principal,
+  requestId: string,
+  idempotencyKey: string,
+  requestHash: string,
+  input: MemoryCaptureInput,
+) => {
+  requirePermission(principal, "memory:propose");
+  const candidate = captureCandidate(input);
+  const assessment = assessCaptureCandidate(candidate);
+  if (assessment.outcome === "discarded") {
+    return {
+      replayed: false,
+      response: {
+        statusCode: 200,
+        body: {
+          request_id: requestId,
+          data: {
+            outcome: "discarded",
+            importance: {
+              importance_score: assessment.importance_score,
+              reasons: assessment.reasons,
+              policy_version: assessment.policy_version,
+            },
+          },
+        },
+      },
+    };
+  }
+  const captured = toCapturedMemory(candidate, assessment);
+  return createMemory(
+    database,
+    principal,
+    requestId,
+    idempotencyKey,
+    requestHash,
+    toMemoryInput(captured),
+    captured.kind,
+    { operationPath: "/v1/memories/capture", automaticCapture: captured.capture },
+  );
+};
 
 interface MemoryTransitionRow {
   id: string;

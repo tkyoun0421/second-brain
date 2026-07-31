@@ -7,7 +7,7 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { McpApiClient } from "./mcp-api-client.js";
 import { createMcpServer } from "./mcp-server.js";
 
-test("MCP server exposes all nine tools and translates API calls", async () => {
+test("MCP server exposes all ten tools and translates API calls", async () => {
   const requests: Array<{ url: string; init: RequestInit }> = [];
   const api = new McpApiClient({
     apiBaseUrl: "http://127.0.0.1:3000/",
@@ -27,8 +27,8 @@ test("MCP server exposes all nine tools and translates API calls", async () => {
   try {
     const listed = await client.listTools();
     assert.deepEqual(listed.tools.map((tool) => tool.name).sort(), [
-      "brain_confirm_memory", "brain_finish_run", "brain_forget", "brain_get_context", "brain_get_detail",
-      "brain_save_decision", "brain_save_failure", "brain_search", "brain_supersede_memory",
+      "brain_capture_auto_memory", "brain_confirm_memory", "brain_finish_run", "brain_forget", "brain_get_context",
+      "brain_get_detail", "brain_save_decision", "brain_save_failure", "brain_search", "brain_supersede_memory",
     ]);
 
     const context = await client.callTool({ name: "brain_get_context", arguments: {
@@ -83,6 +83,58 @@ test("MCP server exposes API dependency errors as failed tool results", async ()
     const payload = JSON.parse(String(content[0]?.text));
     assert.equal(payload.error.code, "DEPENDENCY_UNAVAILABLE");
     assert.equal(payload.error.retryable, true);
+  } finally {
+    await Promise.all([client.close(), server.close()]);
+  }
+});
+
+test("MCP capture tool forwards a structured candidate to the automatic capture endpoint", async () => {
+  const requests: Array<{ url: string; init: RequestInit }> = [];
+  const api = new McpApiClient({
+    apiBaseUrl: "http://127.0.0.1:3000", accessToken: "test-token", requestTimeoutMs: 1_000,
+    async fetch(url, init) {
+      requests.push({ url: String(url), init: init ?? {} });
+      return new Response(JSON.stringify({ request_id: "req-capture", data: { outcome: "stored" } }), {
+        headers: { "content-type": "application/json" },
+      });
+    },
+  });
+  const server = createMcpServer(api);
+  const client = new Client({ name: "mcp-test-client", version: "1.0.0" });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+  try {
+    const result = await client.callTool({ name: "brain_capture_auto_memory", arguments: {
+      idempotency_key: "mcp-capture-test-key-0001",
+      kind: "decision",
+      statement: "Keep API health checks enabled.",
+      rationale: "Deploy readiness depends on it.",
+      scope: { type: "repository", id: "42" },
+      tags: ["deployment"],
+      trigger: "agent_checkpoint",
+      source: { type: "agent_run", id: "100", excerpt: "Healthcheck passed." },
+      occurred_at: "2026-07-31T00:00:00Z",
+      signals: { reusability: 3, impact: 3, scope: 2, evidence: 2, noise_penalty: 0 },
+      decision: { alternatives: ["Skip the healthcheck"] },
+    } });
+
+    assert.equal(result.isError, undefined);
+    assert.equal(requests[0]?.url, "http://127.0.0.1:3000/v1/memories/capture");
+    assert.equal(requests[0]?.init.headers instanceof Headers ? requests[0].init.headers.get("x-idempotency-key") : (requests[0]?.init.headers as Record<string, string>)["x-idempotency-key"], "mcp-capture-test-key-0001");
+    assert.deepEqual(JSON.parse(String(requests[0]?.init.body)), {
+      candidate: {
+        kind: "decision",
+        statement: "Keep API health checks enabled.",
+        rationale: "Deploy readiness depends on it.",
+        scope: { type: "repository", id: "42" },
+        tags: ["deployment"],
+        trigger: "agent_checkpoint",
+        source: { source_type: "agent_run", source_id: "100", source_uri: null, source_excerpt: "Healthcheck passed." },
+        occurred_at: "2026-07-31T00:00:00Z",
+        signals: { reusability: 3, impact: 3, scope: 2, evidence: 2, noise_penalty: 0 },
+        decision: { alternatives: ["Skip the healthcheck"] },
+      },
+    });
   } finally {
     await Promise.all([client.close(), server.close()]);
   }

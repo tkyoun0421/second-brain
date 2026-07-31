@@ -1,10 +1,11 @@
 # Local MCP server
 
-The local MCP server exposes these nine tools over standard input/output:
+The local MCP server exposes these ten tools over standard input/output:
 
 - `brain_get_context`, `brain_search`, `brain_get_detail`
 - `brain_save_decision`, `brain_save_failure`, `brain_finish_run`
 - `brain_confirm_memory`, `brain_supersede_memory`, `brain_forget`
+- `brain_capture_auto_memory` (importance-gated proposed memory capture)
 
 It never opens a database connection. Every tool call is authenticated and forwarded to the
 Second Brain HTTP API. Keep the API credential in the MCP host's user-level secret store or

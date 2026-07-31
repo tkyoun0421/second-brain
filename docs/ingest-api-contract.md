@@ -195,6 +195,7 @@ operations:credential_revoke
 | `GET` | `/v1/memories/{memory_id}` | 기억과 근거 상세 조회 | `memory:read` |
 | `POST` | `/v1/memories/decisions` | 결정 기억 생성 | `memory:propose` 또는 `memory:confirm` |
 | `POST` | `/v1/memories/failures` | 실패 기억 생성 | `memory:propose` 또는 `memory:confirm` |
+| `POST` | `/v1/memories/capture` | 중요도 기반 자동 후보 평가 및 Inbox 저장 | `memory:propose` |
 | `POST` | `/v1/agent-runs/finish` | 작업 실행 결과 기록 | `agent_run:write` |
 | `POST` | `/v1/memories/{memory_id}/confirm` | 제안 기억 확정 | `memory:confirm` |
 | `POST` | `/v1/memories/{memory_id}/supersede` | 기존 기억의 확정 교체 또는 proposed successor 생성 | `memory:supersede` 또는 `memory:propose` |
@@ -872,6 +873,53 @@ policy_event
 `failure.resolution_status`는 `observed`, `investigating`, `hypothesis`, `resolved`, `verified`, `recurring` 중 하나입니다. `verified`에는 `passed` 검증 결과와 `test_result` 또는 검증된 `agent_run` source가 필요합니다. 기억 자체의 `status`와 실패 해결 상태를 혼동하지 않습니다. 원인이나 해결법이 `hypothesis`이면 기억 status도 `proposed`만 허용합니다.
 
 응답 형식은 decision 생성 응답과 같고 `kind`가 `failure`입니다.
+
+### `POST /v1/memories/capture`
+
+작업 체크포인트의 결정 또는 오류 해결 후보를 중요도 규칙으로 평가한다. `X-Idempotency-Key`가 필요하며,
+호출자는 원문 로그 대신 이미 선별한 짧은 후보와 출처를 보낸다.
+
+점수는 `reusability + impact + scope + evidence - noise_penalty`로 계산한다.
+
+- 점수 0~3: `200`과 `outcome: "discarded"`를 반환하며 DB 또는 감사 기록을 만들지 않는다.
+- 점수 4~10: `proposed` 상태의 Memory Inbox 항목으로만 생성한다. 자동 캡처는 `confirmed`나
+  `verified`로 승격할 수 없다.
+- 같은 `kind`, 공백을 정규화한 `statement`, `scope`는 관측 시각과 관계없이 같은 자동 캡처 키를
+  사용한다. 재시도 또는 재관측은 기존 항목을 반환하고 `outcome: "duplicate"`가 된다.
+
+요청:
+
+```json
+{
+  "candidate": {
+    "kind": "decision",
+    "statement": "Deploy checks use the production health endpoint.",
+    "rationale": "A successful build alone does not prove the API is reachable.",
+    "scope": { "type": "repository", "id": "42" },
+    "tags": ["deployment"],
+    "trigger": "agent_checkpoint",
+    "source": {
+      "source_type": "agent_run",
+      "source_id": "run-123",
+      "source_uri": null,
+      "source_excerpt": "GET /v1/health returned 200 after deployment."
+    },
+    "occurred_at": "2026-07-31T12:30:00Z",
+    "signals": {
+      "reusability": 3,
+      "impact": 3,
+      "scope": 2,
+      "evidence": 2,
+      "noise_penalty": 0
+    },
+    "decision": { "alternatives": ["Skip the health check"] }
+  }
+}
+```
+
+저장 응답의 `data`는 `outcome: "stored"`, `importance`, `memory`를 포함한다. `importance`에는
+점수, 판정 사유, 정책 버전이 들어간다. 이 엔드포인트의 후보 형식과 안전 규칙은
+[`automatic-memory-capture.md`](automatic-memory-capture.md)에 정리되어 있다.
 
 ### `POST /v1/agent-runs/finish`
 

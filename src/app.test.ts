@@ -86,6 +86,53 @@ test("memory input with a token is rejected before opening a database transactio
   await app.close();
 });
 
+test("automatic capture discards a low-value transient failure without opening a database transaction", async () => {
+  const app = buildApp({ database, verifier, forgetPreviewSecret: "test-forget-preview-secret-at-least-32" });
+  const response = await app.inject({
+    method: "POST",
+    url: "/v1/memories/capture",
+    headers: { "x-idempotency-key": "mcp:test:capture:discard:0001" },
+    payload: {
+      candidate: {
+        kind: "failure",
+        statement: "A local command timed out once.",
+        rationale: null,
+        scope: { type: "global", id: "global" },
+        tags: ["transient"],
+        trigger: "error_resolution",
+        source: {
+          source_type: "agent_run",
+          source_id: "100",
+          source_uri: null,
+          source_excerpt: "One timeout occurred.",
+        },
+        occurred_at: "2026-07-31T00:00:00Z",
+        signals: { reusability: 0, impact: 1, scope: 0, evidence: 0, noise_penalty: 1 },
+        failure: {
+          resolution_status: "observed",
+          symptom: "The command timed out once.",
+          environment: null,
+          attempts: [],
+          cause_or_hypothesis: null,
+          resolution: null,
+          verification: [],
+        },
+      },
+    },
+  });
+
+  assert.equal(response.statusCode, 200, response.body);
+  assert.deepEqual(response.json().data, {
+    outcome: "discarded",
+    importance: {
+      importance_score: 0,
+      reasons: ["low_reuse", "low_impact", "narrow_scope", "limited_evidence", "noise_penalty"],
+      policy_version: "importance-v1",
+    },
+  });
+  await app.close();
+});
+
 test("Memory Inbox parses list filters and serves the static inbox route", async () => {
   const calls: Array<readonly unknown[] | undefined> = [];
   const memoryReadVerifier: PrincipalVerifier = {
@@ -108,6 +155,6 @@ test("Memory Inbox parses list filters and serves the static inbox route", async
   const response = await app.inject({ method: "GET", url: "/v1/memories/inbox?limit=2&kinds=learning&tags=inbox" });
   assert.equal(response.statusCode, 200, response.body);
   assert.deepEqual(response.json().data, { items: [], next_cursor: null });
-  assert.deepEqual(calls[0], [principal.userId, [], ["learning"], ["inbox"], null, null, 3]);
+  assert.deepEqual(calls[0], [principal.userId, [], ["learning"], ["inbox"], null, null, null, 3]);
   await app.close();
 });
