@@ -1,7 +1,7 @@
 import type { Database, SqlClient } from "./database.js";
 import { ApiError, invalidArgument } from "./errors.js";
 import { assertRepositoryAllowed, requirePermission, type Principal } from "./principal.js";
-import type { ContextQueryInput, MemorySearchInput } from "./schemas.js";
+import type { ContextQueryInput, MemoryInboxQueryInput, MemorySearchInput } from "./schemas.js";
 
 interface MemoryRow {
   id: string;
@@ -122,6 +122,21 @@ const nextCursor = (memory: MemoryRow | undefined) => memory
   ? Buffer.from(JSON.stringify({ updated_at: memory.updated_at, id: memory.id }), "utf8").toString("base64url")
   : null;
 
+const parseInboxCursor = (cursor: string | null) => {
+  if (!cursor) return { createdAt: null, id: null };
+  try {
+    const parsed = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8")) as { created_at?: unknown; id?: unknown };
+    if (typeof parsed.created_at !== "string" || !/^\d+$/.test(String(parsed.id))) throw new Error("invalid");
+    return { createdAt: parsed.created_at, id: String(parsed.id) };
+  } catch {
+    throw invalidArgument("cursor 형식이 올바르지 않습니다.");
+  }
+};
+
+const nextInboxCursor = (memory: MemoryRow | undefined) => memory
+  ? Buffer.from(JSON.stringify({ created_at: memory.created_at, id: memory.id }), "utf8").toString("base64url")
+  : null;
+
 export const queryContext = async (
   database: Database,
   principal: Principal,
@@ -224,6 +239,39 @@ export const searchMemories = async (
   return {
     items: page.map((memory) => memorySummary(memory, sourceMap.get(memory.id) ?? [])),
     next_cursor: hasMore ? nextCursor(page.at(-1)) : null,
+  };
+});
+
+export const listMemoryInbox = async (
+  database: Database,
+  principal: Principal,
+  input: MemoryInboxQueryInput,
+) => database.transaction(principal, async (client) => {
+  requirePermission(principal, "memory:read");
+  const cursor = parseInboxCursor(input.cursor);
+  const kinds = input.kinds ?? ["learning", "decision", "preference", "failure", "procedure", "constraint"];
+  const result = await client.query<MemoryRow>(
+    `select ${visibleMemoryColumns}
+     ${visibleMemorySql}
+      where m.owner_id = $1
+        and ${accessPredicate}
+        and m.status = 'proposed'
+        and m.kind = any($3::public.memory_kind[])
+        and (cardinality($4::text[]) = 0 or m.tags && $4::text[])
+        and ($5::timestamptz is null or (m.created_at, m.id) < ($5::timestamptz, $6::bigint))
+      order by m.created_at desc, m.id desc
+      limit $7`,
+    [
+      principal.userId, [...principal.repositoryNodeIds], kinds, input.tags ?? [],
+      cursor.createdAt, cursor.id, input.limit + 1,
+    ],
+  );
+  const hasMore = result.rows.length > input.limit;
+  const page = result.rows.slice(0, input.limit);
+  const sourceMap = await getSources(client, principal.userId, page.map((memory) => memory.id));
+  return {
+    items: page.map((memory) => memorySummary(memory, sourceMap.get(memory.id) ?? [])),
+    next_cursor: hasMore ? nextInboxCursor(page.at(-1)) : null,
   };
 });
 

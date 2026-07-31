@@ -1,0 +1,51 @@
+name: Sync GitHub issues to Second Brain
+
+on:
+  schedule:
+    - cron: "17 */6 * * *"
+    - cron: "43 3 * * 1"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Sync mode
+        required: true
+        default: incremental
+        type: choice
+        options:
+          - incremental
+          - reconcile
+
+permissions:
+  contents: read
+  issues: read
+
+concurrency:
+  group: second-brain-github-sync-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      SECOND_BRAIN_API_URL: ${{ secrets.SECOND_BRAIN_API_URL }}
+      SECOND_BRAIN_GITHUB_SYNC_TOKEN: ${{ secrets.SECOND_BRAIN_GITHUB_SYNC_TOKEN }}
+      GITHUB_TOKEN: ${{ github.token }}
+      SYNC_MODE: ${{ inputs.mode || (github.event.schedule == '43 3 * * 1' && 'reconcile' || 'incremental') }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Verify required sync configuration
+        run: |
+          test -n "$SECOND_BRAIN_API_URL"
+          test -n "$SECOND_BRAIN_GITHUB_SYNC_TOKEN"
+
+      - name: Synchronize issues and comments
+        run: ./node_modules/.bin/tsx scripts/github-sync.mts --mode="$SYNC_MODE"

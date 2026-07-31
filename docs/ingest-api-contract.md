@@ -187,6 +187,7 @@ operations:credential_revoke
 | `POST` | `/v1/github/sync-runs` | sync 실행 시작 | `github_sync:checkpoint` |
 | `POST` | `/v1/github/sync-runs/{sync_run_id}/heartbeat` | 장시간 sync의 진행 상태 기록 | `github_sync:checkpoint` |
 | `POST` | `/v1/github/sync-runs/{sync_run_id}/items` | Issue·댓글·tombstone batch 수집 | `github_source:write` |
+| `POST` | `/v1/github/sync-runs/{sync_run_id}/reconcile` | 완전한 원격 목록을 기준으로 누락 후보·tombstone 반영 | `github_sync:checkpoint`, `github_source:write` |
 | `POST` | `/v1/github/quarantine/{quarantine_id}/retry` | 수정된 영구 실패 항목 수동 재처리 | `github_quarantine:retry` |
 | `POST` | `/v1/github/sync-runs/{sync_run_id}/complete` | sync 결과 확정과 checkpoint 전진 | `github_sync:checkpoint` |
 | `POST` | `/v1/context/query` | 초기 Context Pack 조회 | `context:read` |
@@ -201,6 +202,16 @@ operations:credential_revoke
 | `POST` | `/v1/memories/{memory_id}/forget` | 기억과 연결 데이터 삭제 | `memory:forget` 또는 `memory:forget_sensitive` |
 
 MCP의 `brain_save_decision`, `brain_save_failure`, `brain_finish_run`, `brain_confirm_memory`, `brain_supersede_memory`는 각각 같은 의미의 API endpoint 하나에 대응합니다. `brain_forget`만 안전을 위해 preview와 execute 두 phase를 사용하며, preview를 삭제 성공으로 보고하면 안 됩니다. 그 밖에 MCP가 API 호출 여러 개를 조합해 하나의 쓰기 성공처럼 보고하면 안 됩니다.
+
+### Reconcile 누락 원본 반영
+
+`POST /v1/github/sync-runs/{sync_run_id}/reconcile`의 body는 빈 object이고 `X-Idempotency-Key`가 필요합니다. 호출자는 해당 reconcile run에서 Issue·댓글 pagination을 모두 성공적으로 읽고, 각 원격 항목 upsert가 끝난 뒤에만 이 endpoint를 호출합니다. 서버는 `last_seen_sync_run_id`가 현재 run이 아닌 GitHub 원본을 처리합니다.
+
+- 기존 `active` 원본은 `missing_candidate`가 됩니다.
+- 이미 `missing_candidate`였고 다음 완전 reconcile에서도 보이지 않은 원본은 `deleted` tombstone이 됩니다.
+- 현재 run에서 다시 관측된 원본은 upsert가 `active`로 복구하므로 누락 처리 대상이 아닙니다.
+
+pagination, GitHub 인증 또는 item 재시도가 완료되지 않은 경우 호출하면 안 됩니다. 실행이 실패하면 동기화 어댑터는 이 endpoint를 건너뛰고 run을 `failed`로 완료해야 합니다.
 
 ## 운영 endpoint
 
@@ -388,8 +399,8 @@ Issue, 댓글, tombstone을 항목 단위로 원본 및 snapshot에 수집합니
 - 같은 source object의 같은 hash가 이미 있으면 새 snapshot을 만들지 않습니다.
 - Issue 식별자는 `(repository_id, issue.number)`이며 GitHub ID와 node ID도 일치해야 합니다. 기존 행과 충돌하면 item 오류 `CONFLICT`와 `reason: "source_identity"`입니다.
 - Issue와 comment는 독립 stream으로 처리합니다. 요청에 comment가 없다는 이유로 기존 comment를 삭제하면 안 됩니다.
-- tombstone은 완전한 `reconcile`에서 삭제가 확인됐거나 [통합 계약](./integration-contracts.md)의 연속 누락 규칙을 충족한 source에만 보냅니다.
-- 명시적 tombstone은 sync run의 repository에 속한다고 확인된 source에만 적용합니다.
+- GitHub Actions의 일반 reconcile은 tombstone item을 만들지 않고, 모든 pagination 성공 후 reconcile endpoint가 서버의 `last_seen_sync_run_id`로 누락 상태를 전진시킵니다.
+- 명시적 tombstone은 이미 `missing_candidate`이고 sync run의 repository에 속한다고 확인된 source에만 적용합니다.
 - `observed_at`은 source 조회 시각이며 미래로 과도하게 치우친 값은 거부합니다.
 - GitHub 원본 복제본은 이 API 외의 endpoint로 수정하지 않습니다.
 

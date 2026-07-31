@@ -335,8 +335,11 @@ const upsertSource = async (
 
   const title = isIssue ? item.issue.title : null;
   const content = isIssue ? item.issue.body : item.comment.body;
+  // `observed_at` records when this sync saw the source; it is not source content.
+  // Keep it in the immutable payload for auditability, but exclude it from the v1
+  // semantic hash so an unchanged overlap/reconcile pass does not create a snapshot.
   const snapshotPayload = { resource_type: item.resource_type, source, observed_at: item.observed_at };
-  const contentHash = sha256(canonicalJson(snapshotPayload));
+  const contentHash = sha256(canonicalJson({ resource_type: item.resource_type, source }));
   const insertedSnapshot = await client.query<{ id: string }>(
     `insert into public.source_snapshots (
        owner_id, source_id, hash_version, content_hash, title, content, payload,
@@ -374,15 +377,23 @@ const tombstoneSource = async (
   }
   const sourceType = item.resource_type === "issue" ? "github_issue" : "github_comment";
   const updated = await client.query<{ id: string }>(
-    `update public.source_records
+    `update public.source_records as source
         set lifecycle_status = 'deleted', consecutive_complete_misses = 2,
-            first_missing_at = coalesce(first_missing_at, now()),
             last_missing_sync_run_id = $1::bigint,
             deleted_at = $2::timestamptz,
-            tombstone = jsonb_build_object('github_id', $3, 'deleted_at', $2::timestamptz)
-      where owner_id = $4 and repository_id = $5::bigint
-        and source_type = $6::public.source_type and provider_id = $3
-      returning id::text`,
+            tombstone = jsonb_build_object(
+              'github_id', $3,
+              'last_content_hash', snapshot.content_hash,
+              'first_missing_at', source.first_missing_at,
+              'confirmed_at', $2::timestamptz,
+              'reconcile_run_id', $1::bigint
+            )
+       from public.source_snapshots as snapshot
+      where source.owner_id = $4 and source.repository_id = $5::bigint
+        and source.source_type = $6::public.source_type and source.provider_id = $3
+        and source.lifecycle_status = 'missing_candidate'
+        and snapshot.owner_id = source.owner_id and snapshot.id = source.current_snapshot_id
+      returning source.id::text`,
     [run.sync_run_id, item.deleted_at, item.github_id, principal.userId, run.id, sourceType],
   );
   if (!updated.rows[0]) throw notFound();
@@ -551,6 +562,89 @@ export const completeSyncRun = async (
           checkpoint: {
             last_successful_observed_through: checkpoint.rows[0]?.observed_through ?? null,
             checkpoint_version: Number(checkpoint.rows[0]?.revision ?? 0),
+          },
+        },
+      };
+    },
+  );
+};
+
+export const reconcileSyncRun = async (
+  database: Database,
+  principal: Principal,
+  requestId: string,
+  idempotencyKey: string,
+  requestHash: string,
+  syncRunId: string,
+) => {
+  requirePermission(principal, "github_sync:checkpoint");
+  requirePermission(principal, "github_source:write");
+  return executeIdempotent(
+    database,
+    principal,
+    {
+      key: idempotencyKey,
+      operation: makeOperation("/v1/github/sync-runs/{sync_run_id}/reconcile"),
+      requestHash,
+      requestId,
+      audit: { operation: "sync", targetType: "sync_run", targetIds: [syncRunId], redactedInput: { reconciliation: true } },
+    },
+    async (client) => {
+      const run = await getSyncRun(client, principal, syncRunId, true);
+      ensureSyncStillRunning(run);
+      if (run.mode !== "reconcile") throw invalidArgument("누락 원본 대조는 reconcile 동기화에서만 실행할 수 있습니다.");
+
+      // Every successful upsert sets last_seen_sync_run_id to this run. Only after
+      // the caller has read every GitHub page can we safely advance missing state.
+      const tombstones = await client.query<{ source_type: "github_issue" | "github_comment" }>(
+        `update public.source_records as source
+            set lifecycle_status = 'deleted',
+                consecutive_complete_misses = 2,
+                last_missing_sync_run_id = $1::bigint,
+                deleted_at = now(),
+                tombstone = jsonb_build_object(
+                  'github_id', source.provider_id,
+                  'last_content_hash', snapshot.content_hash,
+                  'first_missing_at', source.first_missing_at,
+                  'confirmed_at', now(),
+                  'reconcile_run_id', $1::bigint
+                )
+           from public.source_snapshots as snapshot
+          where source.owner_id = $2 and source.repository_id = $3::bigint
+            and source.source_type in ('github_issue', 'github_comment')
+            and source.lifecycle_status = 'missing_candidate'
+            and source.last_seen_sync_run_id is distinct from $1::bigint
+            and snapshot.owner_id = source.owner_id
+            and snapshot.id = source.current_snapshot_id
+          returning source.source_type`,
+        [syncRunId, principal.userId, run.id],
+      );
+      const candidates = await client.query<{ source_type: "github_issue" | "github_comment" }>(
+        `update public.source_records
+            set lifecycle_status = 'missing_candidate',
+                consecutive_complete_misses = 1,
+                first_missing_at = now(),
+                last_missing_sync_run_id = $1::bigint
+          where owner_id = $2 and repository_id = $3::bigint
+            and source_type in ('github_issue', 'github_comment')
+            and lifecycle_status = 'active'
+            and last_seen_sync_run_id is distinct from $1::bigint
+          returning source_type`,
+        [syncRunId, principal.userId, run.id],
+      );
+      const count = (rows: Array<{ source_type: "github_issue" | "github_comment" }>, sourceType: "github_issue" | "github_comment") =>
+        rows.filter((row) => row.source_type === sourceType).length;
+      return {
+        statusCode: 200,
+        data: {
+          sync_run_id: syncRunId,
+          missing_candidates: {
+            issues: count(candidates.rows, "github_issue"),
+            comments: count(candidates.rows, "github_comment"),
+          },
+          tombstones: {
+            issues: count(tombstones.rows, "github_issue"),
+            comments: count(tombstones.rows, "github_comment"),
           },
         },
       };

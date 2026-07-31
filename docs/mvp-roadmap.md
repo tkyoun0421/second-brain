@@ -18,9 +18,19 @@
 - MCP 서버는 로컬에서 필요한 동안만 실행
 - 변경된 데이터만 처리
 
+## 구현 현황 (2026-07-31)
+
+- 데이터베이스 migration, RLS 경계와 Node.js·TypeScript API는 구현되었습니다.
+- Context 조회·기억 검색, decision/failure 생성, agent run 완료, confirm·supersede 및 forget preview/execute API가 구현되었습니다.
+- 표준 입출력 기반 로컬 MCP 서버와 9개 도구가 구현되었습니다.
+- GitHub Actions 증분 동기화 workflow(6시간 증분·주간 reconcile·수동 실행)가 구현되었습니다.
+- 실제 Supabase 프로젝트 연결, custom JWT claim 발급과 GitHub-hosted runner가 접근할 HTTPS 배포 구성이 남아 있습니다.
+
+구현 완료는 운영 환경이 이미 준비되었다는 뜻이 아닙니다. 필요한 환경 변수와 host 설정은 [운영 환경 설정](operations.md)을 따릅니다.
+
 ## 0단계: 설계 기준 확정
 
-현재 단계입니다.
+완료되었습니다.
 
 - 전체 아키텍처
 - 기억 종류, 상태와 범위
@@ -49,6 +59,8 @@
 - 범위와 상태를 저장하고 변경할 수 있음
 - 비인가 요청이 데이터를 읽거나 쓰지 못함
 
+구현은 완료되었고, 실제 Supabase 환경에서 migration 적용 및 JWT 발급 정책을 확정하는 운영 검증이 남아 있습니다.
+
 ## 2단계: GitHub Issue 동기화
 
 ### 구현 범위
@@ -68,6 +80,8 @@
 - workflow를 재실행해도 중복되지 않음
 - 삭제, 상태 변경과 라벨 변경을 반영함
 - 실패 후 다음 실행에서 복구 가능
+
+workflow와 증분 수집 어댑터는 구현되었습니다. reconcile은 완전한 원격 목록 수집 후 서버가 `last_seen_sync_run_id`로 누락 후보와 두 번째 누락 tombstone을 반영합니다. 실제 실행에는 `SECOND_BRAIN_API_URL`과 repository 범위의 `SECOND_BRAIN_GITHUB_SYNC_TOKEN` secret, HTTPS API 배포가 필요합니다.
 
 ## 3단계: 로컬 MCP
 
@@ -93,6 +107,8 @@ Codex와 Claude Code가 같은 서버를 사용하도록 설정합니다.
 - 실패의 가설과 검증된 해결을 구분함
 - 작업 결과와 사용한 기억을 기록함
 - MCP 장애를 AI가 명확히 알 수 있음
+
+9개 도구와 API forwarding은 구현되었습니다. 각 MCP 클라이언트의 사용자 전용 secret 설정과 실제 API 연결은 운영 환경에서 확인해야 합니다.
 
 ## 4단계: 기억 품질과 복구
 
@@ -153,20 +169,16 @@ Codex와 Claude Code가 같은 서버를 사용하도록 설정합니다.
 
 다음 선택은 설계가 아니라 실제 구현을 시작할 때 확정합니다.
 
-1. MCP 서버와 수집 API의 구현 언어
-2. Supabase 인증 주체와 토큰 범위
-3. GitHub App 또는 GitHub Actions 기본 토큰 사용 범위
+1. Supabase custom JWT claim의 발급·회수 방식과 실제 토큰 범위
+2. GitHub App 또는 GitHub Actions 기본 토큰 사용 범위
+3. MCP가 원격 API에 연결할 경우 HTTPS·네트워크 경로
 4. 한국어 검색을 위한 `pg_trgm` 적용 방식
 5. 로컬 백업 위치와 암호화 여부
 
 ## 다음 구현 순서
 
 ```text
-DB 스키마
-→ 인증과 수집 API
-→ GitHub 증분 동기화
-→ MCP 읽기 도구
-→ MCP 쓰기 도구
-→ Memory Inbox와 충돌 처리
+실제 Supabase/JWT 및 GitHub Actions·MCP host 연결 검증
+→ GitHub reconcile tombstone 대조와 Memory Inbox 충돌 처리
 → 내보내기와 운영 점검
 ```

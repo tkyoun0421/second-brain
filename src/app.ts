@@ -23,16 +23,19 @@ import {
   memoryConfirmSchema,
   memoryForgetPreviewSchema,
   memoryForgetSchema,
+  memoryInboxQuerySchema,
   memorySearchSchema,
   memorySupersedeSchema,
   syncCompleteSchema,
+  syncReconcileSchema,
   syncItemsSchema,
   syncStartSchema,
 } from "./schemas.js";
-import { getMemoryDetail, queryContext, searchMemories } from "./read-services.js";
+import { getMemoryDetail, listMemoryInbox, queryContext, searchMemories } from "./read-services.js";
 import { rejectSensitiveData } from "./sensitive.js";
 import {
   completeSyncRun,
+  reconcileSyncRun,
   confirmMemory,
   createDecision,
   createFailure,
@@ -213,6 +216,18 @@ export const buildApp = ({ database, verifier, forgetPreviewSecret }: AppDepende
     },
   );
 
+  app.post<{ Params: { sync_run_id: string } }>(
+    "/v1/github/sync-runs/:sync_run_id/reconcile",
+    async (request, reply) => {
+      const principal = principalOf(request);
+      const input = syncReconcileSchema.parse(bodyOf(request));
+      return sendIdempotent(reply, await reconcileSyncRun(
+        database, principal, request.id, idempotencyKeyOf(request), hashRequest(input),
+        numericPathId(request.params.sync_run_id, "sync_run_id"),
+      ));
+    },
+  );
+
   app.post("/v1/context/query", async (request) => {
     const input = contextQuerySchema.parse(bodyOf(request));
     rejectSensitiveData(input);
@@ -223,6 +238,11 @@ export const buildApp = ({ database, verifier, forgetPreviewSecret }: AppDepende
     const input = memorySearchSchema.parse(bodyOf(request));
     rejectSensitiveData(input);
     return { request_id: request.id, data: await searchMemories(database, principalOf(request), input) };
+  });
+
+  app.get("/v1/memories/inbox", async (request) => {
+    const input = memoryInboxQuerySchema.parse(request.query);
+    return { request_id: request.id, data: await listMemoryInbox(database, principalOf(request), input) };
   });
 
   app.get<{ Params: { memory_id: string } }>("/v1/memories/:memory_id", async (request) => ({

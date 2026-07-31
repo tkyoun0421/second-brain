@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import type { QueryResultRow } from "pg";
 
 import { buildApp } from "./app.js";
 import type { PrincipalVerifier } from "./auth.js";
@@ -82,5 +83,31 @@ test("memory input with a token is rejected before opening a database transactio
   });
   assert.equal(response.statusCode, 422);
   assert.equal(response.json().error.code, "SENSITIVE_DATA_DETECTED");
+  await app.close();
+});
+
+test("Memory Inbox parses list filters and serves the static inbox route", async () => {
+  const calls: Array<readonly unknown[] | undefined> = [];
+  const memoryReadVerifier: PrincipalVerifier = {
+    async verify() {
+      return { ...principal, permissions: new Set(["memory:read"]) };
+    },
+  };
+  const inboxDatabase: Database = {
+    async transaction(_principal, action) {
+      return action({
+        async query<Row extends QueryResultRow>(_text: string, values?: readonly unknown[]) {
+          calls.push(values);
+          return { rows: [] as Row[], rowCount: 0 };
+        },
+      });
+    },
+    async close() {},
+  };
+  const app = buildApp({ database: inboxDatabase, verifier: memoryReadVerifier, forgetPreviewSecret: "test-forget-preview-secret-at-least-32" });
+  const response = await app.inject({ method: "GET", url: "/v1/memories/inbox?limit=2&kinds=learning&tags=inbox" });
+  assert.equal(response.statusCode, 200, response.body);
+  assert.deepEqual(response.json().data, { items: [], next_cursor: null });
+  assert.deepEqual(calls[0], [principal.userId, [], ["learning"], ["inbox"], null, null, 3]);
   await app.close();
 });

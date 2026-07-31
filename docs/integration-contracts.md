@@ -261,12 +261,12 @@ backoff에는 jitter를 적용하고 한 실행의 총 재시도 시간에는 �
 1. repository 접근 가능 여부를 먼저 확인합니다.
 2. open/closed 전체 Issue를 pagination 끝까지 읽습니다.
 3. 각 대상 Issue의 댓글 전체 목록을 읽습니다.
-4. 원격 현재 hash와 로컬 current hash를 비교합니다.
-5. 원격에 있고 로컬에 없으면 새 엔티티로 수집합니다.
-6. 양쪽에 있지만 hash가 다르면 새 snapshot을 수집합니다.
+4. 각 원격 항목을 수집 API에 upsert해 현재 run의 `last_seen_sync_run_id`를 기록합니다.
+5. 모든 pagination이 성공한 뒤 reconcile endpoint가 현재 run에서 관측되지 않은 원본을 서버 내부에서 대조합니다.
+6. 원격에 있고 로컬에 없으면 새 엔티티가 수집되고, 내용 hash가 다르면 새 snapshot이 생성됩니다.
 7. 원격에 없고 로컬에 있으면 첫 누락은 `missing_candidate`, 연속 두 번째 누락은 tombstone으로 처리합니다.
 8. 원격에 다시 나타난 `missing_candidate`는 `active`로 복구합니다.
-9. 처리되지 않은 retryable 오류가 하나라도 있으면 reconcile을 불완전으로 표시하고 누락 횟수를 증가시키지 않습니다.
+9. 처리되지 않은 retryable 오류가 하나라도 있으면 reconcile endpoint를 호출하지 않아 누락 횟수를 증가시키지 않습니다.
 
 reconcile은 마지막 증분 커서를 뒤로 이동시키지 않습니다. 성공한 reconcile 종료 시각이 기존 `successful_through`보다 최신이면 그 시각까지 전진시킬 수 있지만, 실행 전체가 완전했을 때만 허용합니다.
 

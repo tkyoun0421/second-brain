@@ -11,7 +11,7 @@
     "start": "tsx src/index.ts",
     "mcp": "tsx src/mcp-server.ts",
     "check": "tsc --noEmit",
-    "test": "tsx --test src/**/*.test.ts",
+    "test": "tsx --test src/**/*.test.ts scripts/**/*.test.ts",
     "validate:schema": "node scripts/validate-db-schema.mjs"
   },
   "dependencies": {

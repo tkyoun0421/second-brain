@@ -103,6 +103,8 @@ export const syncCompleteSchema = z.discriminatedUnion("status", [
   }),
 ]);
 
+export const syncReconcileSchema = z.object({}).strict();
+
 const scopeSchema = z.object({
   type: z.enum(["global", "organization", "repository", "project", "path", "task"]),
   id: nonBlank.max(1_000),
@@ -279,6 +281,19 @@ export const memorySearchSchema = z.object({
   cursor: z.string().min(1).max(1_000).nullable().default(null),
 });
 
+const queryList = <T extends z.ZodType>(item: T, max: number) => z.preprocess((value) => {
+  if (typeof value === "string") return value.split(",").filter(Boolean);
+  return value;
+}, z.array(item).max(max));
+
+export const memoryInboxQuerySchema = z.object({
+  kinds: queryList(memoryKindSchema, 6).optional(),
+  tags: queryList(nonBlank.max(100), 30).optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+  cursor: z.preprocess((value) => value === "" || value === undefined ? null : value,
+    z.string().min(1).max(1_000).nullable()).default(null),
+});
+
 export type SyncStartInput = z.infer<typeof syncStartSchema>;
 export type SyncItem = z.infer<typeof syncItemSchema>;
 export type SyncCompleteInput = z.infer<typeof syncCompleteSchema>;
@@ -286,6 +301,7 @@ export type DecisionInput = z.infer<typeof decisionSchema>;
 export type FailureInput = z.infer<typeof failureSchema>;
 export type ContextQueryInput = z.infer<typeof contextQuerySchema>;
 export type MemorySearchInput = z.infer<typeof memorySearchSchema>;
+export type MemoryInboxQueryInput = z.infer<typeof memoryInboxQuerySchema>;
 export type AgentRunFinishInput = z.infer<typeof agentRunFinishSchema>;
 export type MemoryConfirmInput = z.infer<typeof memoryConfirmSchema>;
 export type MemorySupersedeInput = z.infer<typeof memorySupersedeSchema>;
