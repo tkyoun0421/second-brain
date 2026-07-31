@@ -1,0 +1,28 @@
+{
+  "name": "second-brain",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "check": "tsc --noEmit",
+    "test": "tsx --test src/**/*.test.ts",
+    "validate:schema": "node scripts/validate-db-schema.mjs"
+  },
+  "dependencies": {
+    "fastify": "^5.6.1",
+    "jose": "^6.1.0",
+    "pg": "^8.16.3",
+    "zod": "^4.1.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.18.0",
+    "@types/pg": "^8.15.5",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2"
+  }
+}
