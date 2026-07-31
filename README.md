@@ -2,7 +2,7 @@
 
 GitHub에 기록한 학습 내용과 AI와 함께 작업하며 생긴 결정, 선호, 실패 및 해결 경험을 모아 다음 작업에 다시 사용하는 개인 지식 시스템입니다.
 
-현재 단계의 목표는 구현이 아니라 시스템의 경계와 운영 원칙을 먼저 확정하는 것입니다.
+현재 단계의 목표는 확정된 설계를 바탕으로 MVP 데이터 기반과 인터페이스 계약을 구현하는 것입니다.
 
 ## 핵심 방향
 
@@ -30,6 +30,10 @@ Codex·Claude ── 로컬 MCP 서버 ────┘                         �
 - [Context 및 MCP 계약](docs/context-contract.md)
 - [기억 운영 정책](docs/memory-policy.md)
 - [무료 MVP 로드맵](docs/mvp-roadmap.md)
+- [데이터베이스 스키마](docs/db-schema.md)
+- [수집 API 및 인증 계약](docs/ingest-api-contract.md)
+- [GitHub 동기화 및 MCP 통합 계약](docs/integration-contracts.md)
+- [테스트 전략](docs/test-strategy.md)
 
 ## 현재 확정하지 않은 것
 
