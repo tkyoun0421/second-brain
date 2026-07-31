@@ -28,6 +28,15 @@ exception
 end;
 $$;
 
+do $$
+begin
+  create role supabase_auth_admin nologin;
+exception
+  when duplicate_object then
+    null;
+end;
+$$;
+
 create schema if not exists auth;
 
 create table if not exists auth.users (

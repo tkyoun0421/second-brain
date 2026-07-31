@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 
 const GITHUB_API_URL = "https://api.github.com";
-const MAX_BATCH_SIZE = 100;
+const MAX_BATCH_SIZE = 10;
 const DEFAULT_MAX_RETRIES = 3;
 const DEFAULT_TIMEOUT_MS = 20_000;
 

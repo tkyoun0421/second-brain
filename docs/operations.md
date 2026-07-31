@@ -50,11 +50,40 @@ API는 Supabase JWT를 검증한 뒤 다음 custom claim으로 요청 주체를 
 }
 ```
 
-`sub`는 tenant 사용자 ID입니다. `principal_type`은 `mcp_agent`, `github_sync`, `operator` 중 해당 실행 주체와 일치해야 합니다. 권한과 `repository_ids` 범위는 endpoint별 권한 검사와 RLS 모두에 적용됩니다.
+`sub`는 Supabase Auth 사용자 ID입니다. API에서 tenant 소유권의 기준은 Hook이 발급하는 `user_id` claim이며, 일반 사용자/MCP에서는 `sub`와 같고 기술 계정에서는 데이터 소유자 UUID로 매핑됩니다. `principal_type`은 `mcp_agent`, `github_sync`, `operator` 중 해당 실행 주체와 일치해야 합니다. 권한과 `repository_ids` 범위는 endpoint별 권한 검사와 RLS 모두에 적용됩니다.
 
 일반 MCP session은 읽기·제안·실행 기록 권한만 가지는 것이 기본입니다. 사용자 명시 확인을 처리할 때에만 짧은 유효기간의 `memory:confirm` 또는 `memory:supersede` 권한을 추가합니다. forget은 별도의 `memory:forget` 또는 `memory:forget_sensitive` 권한과 preview/execute 확인 흐름을 요구합니다.
 
-Supabase에서 위 custom claim을 어느 hook, server-side issuer 또는 credential broker로 발급할지는 아직 확정하지 않았습니다. 그 체계를 정하기 전에는 placeholder token이나 `service_role` key로 운영하지 않습니다.
+### Custom Access Token Hook
+
+`20260731000600_custom_access_token_hook.sql`과 `20260731000700_principal_claim_tenant_mapping.sql`은 `private.auth_principal_claims`에서 권한을 읽어 Supabase access token에 `user_id`, `principal_type`, `permissions`, `repository_ids`를 추가합니다. Hook은 `supabase_auth_admin`만 실행할 수 있고, 권한 테이블도 그 역할의 읽기만 허용합니다. `service_role` key를 GitHub Actions나 MCP에 전달하지 않습니다.
+
+각 실행 주체는 **별도의 Supabase Auth 사용자**를 사용해야 합니다. 하나의 사용자에 GitHub Actions와 MCP 권한을 함께 넣으면 최소 권한 원칙이 무너집니다. 기술 계정의 `sub`는 그 계정의 Auth UUID이고, `tenant_user_id`는 실제 데이터 소유자의 Auth UUID입니다. Hook은 `tenant_user_id`를 `user_id` claim으로 발급하므로, GitHub 동기화와 MCP가 같은 소유자 데이터에 안전하게 접근할 수 있습니다.
+
+| 실행 주체 | principal_type | 기본 permissions |
+| --- | --- | --- |
+| GitHub Actions 동기화 | `github_sync` | `github_source:write`, `github_sync:checkpoint` |
+| 로컬 MCP | `mcp_agent` | `context:read`, `memory:read`, `memory:propose`, `agent_run:write` |
+| 운영 작업 | `operator` | 작업별로 필요한 권한만 별도 부여 |
+
+권한을 바꾸거나 `is_active`를 `false`로 바꾸면 다음 access token 발급 또는 refresh부터 반영됩니다. 이미 발급된 access token은 만료 전까지 유효하므로, 긴급 차단 시에는 해당 Auth 사용자의 세션도 함께 종료합니다.
+
+운영 DB에서 Auth 사용자를 만든 뒤, 해당 사용자의 UUID와 GitHub repository node ID를 사용해 한 행씩 등록합니다. 아래 예시는 자리표시자만 실제 값으로 바꿔 SQL Editor에서 실행합니다.
+
+```sql
+insert into private.auth_principal_claims (
+  user_id, tenant_user_id, principal_type, permissions, repository_ids
+)
+values (
+  '<TECHNICAL_AUTH_USER_UUID>',
+  '<TENANT_OWNER_AUTH_USER_UUID>',
+  'github_sync',
+  array['github_source:write', 'github_sync:checkpoint'],
+  array['<GITHUB_REPOSITORY_NODE_ID>']
+);
+```
+
+마이그레이션을 적용한 뒤 Supabase Dashboard에서 **Authentication → Hooks → Custom Access Token**을 열어 PostgreSQL 함수 `public.custom_access_token_hook`을 선택하고 활성화합니다. 이후 새 로그인 또는 token refresh로 발급된 JWT에만 claim이 들어갑니다. Hook이 없는 사용자 토큰은 API 검증 단계에서 거부됩니다.
 
 ## 최소 기동·확인 순서
 
