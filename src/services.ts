@@ -259,9 +259,9 @@ export const heartbeatSyncRun = async (
         `update public.sync_runs
             set counts = counts || jsonb_build_object(
                   'heartbeat', jsonb_build_object(
-                    'stream', $1,
-                    'pages_completed', $2,
-                    'items_accepted', $3,
+                    'stream', $1::text,
+                    'pages_completed', $2::integer,
+                    'items_accepted', $3::integer,
                     'observed_through', $4::timestamptz
                   )
                 )

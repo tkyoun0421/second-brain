@@ -5,7 +5,7 @@ import type { QueryResultRow } from "pg";
 import type { Database } from "./database.js";
 import type { Principal } from "./principal.js";
 import type { SyncItem } from "./schemas.js";
-import { reconcileSyncRun, syncItemIdempotencyKey, syncItemRequestHash } from "./services.js";
+import { heartbeatSyncRun, reconcileSyncRun, syncItemIdempotencyKey, syncItemRequestHash } from "./services.js";
 
 const principal: Principal = {
   principalId: "11111111-1111-4111-8111-111111111111",
@@ -27,6 +27,44 @@ test("sync item idempotency ignores an observation timestamp change", () => {
 
   assert.equal(syncItemRequestHash(initial), syncItemRequestHash(observedAgain));
   assert.equal(syncItemIdempotencyKey(initial), `v2:${initial.idempotency_key}`);
+});
+
+test("heartbeat types its JSONB parameters explicitly", async () => {
+  const queries: string[] = [];
+  const database: Database = {
+    async transaction(_principal, action) {
+      return action({
+        async query<Row extends QueryResultRow>(text: string) {
+          queries.push(text);
+          if (text.includes("insert into public.idempotency_records")) return { rows: [{ id: "1" }] as unknown as Row[], rowCount: 1 };
+          if (text.includes("from public.sync_runs sr")) {
+            return {
+              rows: [{ sync_run_id: "99", mode: "incremental", status: "running", id: "77", github_node_id: "R_reconcile_test" }] as unknown as Row[],
+              rowCount: 1,
+            };
+          }
+          if (text.includes("set counts = counts || jsonb_build_object")) return { rows: [{ updated_at: "2026-07-31T00:00:00.000Z" }] as unknown as Row[], rowCount: 1 };
+          return { rows: [] as Row[], rowCount: 1 };
+        },
+      });
+    },
+    async close() {},
+  };
+
+  await heartbeatSyncRun(
+    database,
+    principal,
+    "33333333-3333-4333-8333-333333333333",
+    "github:heartbeat:0001",
+    "hash",
+    "99",
+    { stream: "issues", pages_completed: 1, items_accepted: 100, observed_through: "2026-07-31T00:00:00.000Z" },
+  );
+
+  const heartbeat = queries.find((query) => query.includes("set counts = counts || jsonb_build_object"));
+  assert.match(heartbeat ?? "", /'stream', \$1::text/);
+  assert.match(heartbeat ?? "", /'pages_completed', \$2::integer/);
+  assert.match(heartbeat ?? "", /'items_accepted', \$3::integer/);
 });
 
 test("reconcile tombstones prior missing candidates before marking the current misses", async () => {
