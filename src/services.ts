@@ -98,6 +98,12 @@ const ensureSyncStillRunning = (syncRun: SyncRunRow) => {
 
 const makeOperation = (path: string) => `POST ${path}`;
 
+export const syncItemRequestHash = (item: SyncItem) => {
+  if (item.operation === "tombstone") return sha256(canonicalJson(item));
+  const { observed_at: _observedAt, ...stableItem } = item;
+  return sha256(canonicalJson(stableItem));
+};
+
 export const getCheckpoint = async (
   database: Database,
   principal: Principal,
@@ -414,7 +420,7 @@ export const processSyncItem = async (
     {
       key: item.idempotency_key,
       operation: "github_source_item",
-      requestHash: sha256(canonicalJson(item)),
+      requestHash: syncItemRequestHash(item),
       requestId,
       audit: { operation: "sync", targetType: "source_item", targetIds: [syncRunId], redactedInput: { resource_type: item.resource_type, operation: item.operation } },
     },

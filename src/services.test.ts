@@ -4,7 +4,8 @@ import type { QueryResultRow } from "pg";
 
 import type { Database } from "./database.js";
 import type { Principal } from "./principal.js";
-import { reconcileSyncRun } from "./services.js";
+import type { SyncItem } from "./schemas.js";
+import { reconcileSyncRun, syncItemRequestHash } from "./services.js";
 
 const principal: Principal = {
   principalId: "11111111-1111-4111-8111-111111111111",
@@ -13,6 +14,19 @@ const principal: Principal = {
   permissions: new Set(["github_sync:checkpoint", "github_source:write"]),
   repositoryNodeIds: new Set(["R_reconcile_test"]),
 };
+
+test("sync item idempotency ignores an observation timestamp change", () => {
+  const initial = {
+    idempotency_key: "gh:R_reconcile_test:issue:1:stable-content-hash",
+    resource_type: "issue",
+    operation: "upsert",
+    observed_at: "2026-07-31T00:00:00.000Z",
+    issue: {},
+  } as SyncItem;
+  const observedAgain = { ...initial, observed_at: "2026-07-31T01:00:00.000Z" };
+
+  assert.equal(syncItemRequestHash(initial), syncItemRequestHash(observedAgain));
+});
 
 test("reconcile tombstones prior missing candidates before marking the current misses", async () => {
   const queries: string[] = [];
