@@ -319,6 +319,20 @@ export const verificationDashboardHtml = () => `<!doctype html>
           inboxPrevious.disabled = inboxState.page === 0;
           inboxNext.disabled = true;
           const code = error instanceof Error ? error.message : "REQUEST_FAILED";
+          if (code === "DASHBOARD_TOKEN_NOT_CONFIGURED") {
+            setInboxStatus(
+              "대시보드 자동 로그인을 사용하려면 서버에 SECOND_BRAIN_DASHBOARD_MCP_AGENT_EMAIL 및 PASSWORD를 설정한 뒤 다시 시작하세요.",
+              true,
+            );
+            return;
+          }
+          if (code === "DASHBOARD_TOKEN_UNAVAILABLE") {
+            setInboxStatus(
+              "대시보드 토큰을 자동으로 갱신하지 못했습니다. 서버의 SECOND_BRAIN_DASHBOARD_MCP_AGENT_EMAIL 및 PASSWORD 설정을 확인한 뒤 다시 시도하세요.",
+              true,
+            );
+            return;
+          }
           setInboxStatus(
             code === "DASHBOARD_TOKEN_NOT_CONFIGURED"
               ? "서버의 SECOND_BRAIN_MCP_ACCESS_TOKEN 환경 변수를 설정한 뒤 서버를 다시 시작하세요."
@@ -349,6 +363,7 @@ export const verificationDashboardHtml = () => `<!doctype html>
         void loadInbox();
       });
       renderCapture();
+      void loadInbox();
     </script>
   </body>
 </html>`;

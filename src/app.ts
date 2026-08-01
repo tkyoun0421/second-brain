@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import Fastify, { type FastifyInstance } from "fastify";
 
 import type { PrincipalVerifier } from "#app/common/auth/auth.service.js";
+import type { AccessTokenProvider } from "#app/common/auth/access-token-provider.js";
 import type { Database } from "#app/common/database/database.js";
 import { asApiError } from "#app/common/errors/errors.js";
 import type { Principal } from "#app/common/auth/principal.js";
@@ -21,7 +22,7 @@ export interface AppDependencies {
   database: Database;
   verifier: PrincipalVerifier;
   forgetPreviewSecret: string;
-  dashboardAccessToken?: string;
+  dashboardTokenProvider?: AccessTokenProvider;
 }
 
 const publicRoutes = new Set([

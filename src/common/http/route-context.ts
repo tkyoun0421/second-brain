@@ -1,6 +1,7 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
 
 import type { PrincipalVerifier } from "#app/common/auth/auth.service.js";
+import type { AccessTokenProvider } from "#app/common/auth/access-token-provider.js";
 import type { Database } from "#app/common/database/database.js";
 import { ApiError, invalidArgument } from "#app/common/errors/errors.js";
 import type { StoredResponse } from "#app/common/idempotency/idempotency.service.js";
@@ -11,7 +12,7 @@ export interface RouteDependencies {
   database: Database;
   verifier: PrincipalVerifier;
   forgetPreviewSecret: string;
-  dashboardAccessToken?: string;
+  dashboardTokenProvider?: AccessTokenProvider;
 }
 
 export const numericPathId = (value: string, name: string) => {

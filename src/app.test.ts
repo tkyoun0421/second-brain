@@ -85,11 +85,14 @@ test("verification dashboard is public and exposes the visual check controls", a
   assert.match(response.body, /Memory Inbox · 실제 저장된 제안/);
   assert.doesNotMatch(response.body, /inboxToken/);
   assert.match(response.body, /id="checkpoint-button"/);
+  assert.match(response.body, /renderCapture\(\);\s+void loadInbox\(\);/);
+  assert.match(response.body, /SECOND_BRAIN_DASHBOARD_MCP_AGENT_EMAIL/);
   await app.close();
 });
 
 test("verification Inbox proxy uses only the server-configured token", async () => {
   const authorizations: Array<string | undefined> = [];
+  let accessTokenRequests = 0;
   const dashboardVerifier: PrincipalVerifier = {
     async verify(authorization) {
       authorizations.push(authorization);
@@ -110,11 +113,17 @@ test("verification Inbox proxy uses only the server-configured token", async () 
     database: dashboardDatabase,
     verifier: dashboardVerifier,
     forgetPreviewSecret: "test-forget-preview-secret-at-least-32",
-    dashboardAccessToken: "server-only-dashboard-token",
+    dashboardTokenProvider: {
+      async getAccessToken() {
+        accessTokenRequests += 1;
+        return "server-only-dashboard-token";
+      },
+    },
   });
   const response = await app.inject({ method: "GET", url: "/verification/memories/inbox?limit=10" });
   assert.equal(response.statusCode, 200, response.body);
   assert.deepEqual(response.json().data, { items: [], next_cursor: null, total_count: 0 });
+  assert.equal(accessTokenRequests, 1);
   assert.deepEqual(authorizations, ["Bearer server-only-dashboard-token"]);
   await app.close();
 });
@@ -124,6 +133,24 @@ test("verification Inbox proxy remains disabled until its server token is config
   const response = await app.inject({ method: "GET", url: "/verification/memories/inbox" });
   assert.equal(response.statusCode, 503);
   assert.equal(response.json().error.code, "DASHBOARD_TOKEN_NOT_CONFIGURED");
+  await app.close();
+});
+
+test("verification Inbox proxy returns a sanitized error when its token provider fails", async () => {
+  const app = buildApp({
+    database,
+    verifier,
+    forgetPreviewSecret: "test-forget-preview-secret-at-least-32",
+    dashboardTokenProvider: {
+      async getAccessToken() {
+        throw new Error("invalid login credentials must not reach the browser");
+      },
+    },
+  });
+  const response = await app.inject({ method: "GET", url: "/verification/memories/inbox" });
+  assert.equal(response.statusCode, 503);
+  assert.equal(response.json().error.code, "DASHBOARD_TOKEN_UNAVAILABLE");
+  assert.doesNotMatch(response.body, /invalid login credentials/);
   await app.close();
 });
 
