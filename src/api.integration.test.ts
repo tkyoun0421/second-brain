@@ -3,10 +3,10 @@ import test from "node:test";
 
 import { Pool } from "pg";
 
-import { buildApp } from "./app.js";
-import type { PrincipalVerifier } from "./auth.js";
-import { PostgresDatabase } from "./database.js";
-import type { Principal } from "./principal.js";
+import { buildApp } from "#app/app.js";
+import type { PrincipalVerifier } from "#app/auth.js";
+import { PostgresDatabase } from "#app/database.js";
+import type { Principal } from "#app/principal.js";
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 const ownerId = "00000000-0000-0000-0000-000000000101";

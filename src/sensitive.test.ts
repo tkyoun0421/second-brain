@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { ApiError } from "./errors.js";
-import { rejectSensitiveData } from "./sensitive.js";
+import { ApiError } from "#app/errors.js";
+import { rejectSensitiveData } from "#app/sensitive.js";
 
 test("sensitive scanner rejects nested GitHub tokens without returning the token", () => {
   assert.throws(

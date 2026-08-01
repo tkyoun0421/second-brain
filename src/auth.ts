@@ -1,8 +1,8 @@
 import { createRemoteJWKSet, jwtVerify } from "jose";
 import { z } from "zod";
 
-import { ApiError } from "./errors.js";
-import { permissionValues, type Permission, type Principal, type PrincipalType } from "./principal.js";
+import { ApiError } from "#app/errors.js";
+import { permissionValues, type Permission, type Principal, type PrincipalType } from "#app/principal.js";
 
 export interface PrincipalVerifier {
   verify(authorization: string | undefined): Promise<Principal>;

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { createStopCheckpointResponse, shouldRequestCheckpoint } from "./checkpoint-hook.js";
+import { createStopCheckpointResponse, shouldRequestCheckpoint } from "#app/checkpoint-hook.js";
 
 test("requests one checkpoint before a completed implementation response is finalized", () => {
   const response = createStopCheckpointResponse({

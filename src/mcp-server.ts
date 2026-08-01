@@ -5,7 +5,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 
-import { McpApiClient, McpApiError, loadMcpApiClientConfig } from "./mcp-api-client.js";
+import { McpApiClient, McpApiError, loadMcpApiClientConfig } from "#app/mcp-api-client.js";
 
 const version = "0.1.0";
 const memoryId = z.string().regex(/^\d+$/, "memory_id must be a positive integer string");

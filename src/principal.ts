@@ -1,4 +1,4 @@
-import { ApiError } from "./errors.js";
+import { ApiError } from "#app/errors.js";
 
 export const permissionValues = [
   "github_source:write",

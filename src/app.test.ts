@@ -2,11 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { QueryResultRow } from "pg";
 
-import { buildApp } from "./app.js";
-import type { PrincipalVerifier } from "./auth.js";
-import type { Database } from "./database.js";
-import { ApiError } from "./errors.js";
-import type { Principal } from "./principal.js";
+import { buildApp } from "#app/app.js";
+import type { PrincipalVerifier } from "#app/auth.js";
+import type { Database } from "#app/database.js";
+import { ApiError } from "#app/errors.js";
+import type { Principal } from "#app/principal.js";
 
 const principal: Principal = {
   principalId: "11111111-1111-4111-8111-111111111111",
@@ -34,6 +34,39 @@ test("health endpoint does not require authentication", async () => {
   const response = await app.inject({ method: "GET", url: "/v1/health" });
   assert.equal(response.statusCode, 200);
   assert.equal(response.json().data.status, "ok");
+  await app.close();
+});
+
+test("API route registry keeps the public HTTP contract stable", async () => {
+  const app = buildApp({ database, verifier, forgetPreviewSecret: "test-forget-preview-secret-at-least-32" });
+  const routes = [
+    ["GET", "/v1/health"],
+    ["GET", "/verification"],
+    ["GET", "/verification/memories/inbox"],
+    ["GET", "/v1/github/repositories/:github_repository_id/checkpoint"],
+    ["POST", "/v1/github/sync-runs"],
+    ["POST", "/v1/github/sync-runs/:sync_run_id/heartbeat"],
+    ["POST", "/v1/github/sync-runs/:sync_run_id/items"],
+    ["POST", "/v1/github/sync-runs/:sync_run_id/complete"],
+    ["POST", "/v1/github/sync-runs/:sync_run_id/reconcile"],
+    ["POST", "/v1/context/query"],
+    ["POST", "/v1/memories/search"],
+    ["GET", "/v1/memories/inbox"],
+    ["GET", "/v1/memories/:memory_id"],
+    ["POST", "/v1/memories/decisions"],
+    ["POST", "/v1/memories/failures"],
+    ["POST", "/v1/memories/capture"],
+    ["POST", "/v1/agent-runs/finish"],
+    ["POST", "/v1/memories/:memory_id/confirm"],
+    ["POST", "/v1/memories/:memory_id/supersede"],
+    ["POST", "/v1/memories/:memory_id/forget-preview"],
+    ["POST", "/v1/memories/:memory_id/forget"],
+  ] as const;
+
+  for (const [method, url] of routes) {
+    assert.equal(app.hasRoute({ method, url }), true, `${method} ${url} must stay registered`);
+  }
+
   await app.close();
 });
 

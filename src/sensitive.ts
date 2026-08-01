@@ -1,4 +1,4 @@
-import { ApiError } from "./errors.js";
+import { ApiError } from "#app/errors.js";
 
 interface SensitiveMatch {
   path: string;

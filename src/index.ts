@@ -1,8 +1,8 @@
 import { existsSync } from "node:fs";
-import { SupabaseJwtVerifier } from "./auth.js";
-import { buildApp } from "./app.js";
-import { loadConfig } from "./config.js";
-import { PostgresDatabase } from "./database.js";
+import { SupabaseJwtVerifier } from "#app/auth.js";
+import { buildApp } from "#app/app.js";
+import { loadConfig } from "#app/config.js";
+import { PostgresDatabase } from "#app/database.js";
 
 if (existsSync(".env")) {
   process.loadEnvFile(".env");

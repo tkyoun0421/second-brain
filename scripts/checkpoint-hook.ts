@@ -1,4 +1,4 @@
-import { createStopCheckpointResponse, type StopHookInput } from "../src/checkpoint-hook.js";
+import { createStopCheckpointResponse, type StopHookInput } from "#app/checkpoint-hook.js";
 
 async function readStandardInput(): Promise<string> {
   const chunks: Buffer[] = [];

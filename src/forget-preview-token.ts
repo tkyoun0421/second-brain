@@ -1,6 +1,6 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 
-import { ApiError } from "./errors.js";
+import { ApiError } from "#app/errors.js";
 
 export type ForgetReasonCode = "user_requested" | "sensitive_data" | "retention_expired" | "unauthorized_source";
 

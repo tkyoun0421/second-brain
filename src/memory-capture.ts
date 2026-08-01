@@ -1,4 +1,4 @@
-import { canonicalJson, sha256 } from "./hash.js";
+import { canonicalJson, sha256 } from "#app/hash.js";
 
 export const importancePolicyVersion = "importance-v1";
 export const minimumStoredImportance = 4;

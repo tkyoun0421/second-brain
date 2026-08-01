@@ -1,6 +1,6 @@
-import type { Database, SqlClient } from "./database.js";
-import { ApiError } from "./errors.js";
-import type { Principal } from "./principal.js";
+import type { Database, SqlClient } from "#app/database.js";
+import { ApiError } from "#app/errors.js";
+import type { Principal } from "#app/principal.js";
 
 export interface StoredResponse {
   statusCode: number;

@@ -1,6 +1,6 @@
 import { Pool, type PoolClient, type QueryResultRow } from "pg";
 
-import type { Principal } from "./principal.js";
+import type { Principal } from "#app/principal.js";
 
 export interface SqlClient {
   query<Row extends QueryResultRow = QueryResultRow>(

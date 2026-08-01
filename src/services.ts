@@ -1,25 +1,25 @@
-import type { SqlClient, Database } from "./database.js";
-import { ApiError, invalidArgument } from "./errors.js";
-import { canonicalJson, sha256 } from "./hash.js";
+import type { SqlClient, Database } from "#app/database.js";
+import { ApiError, invalidArgument } from "#app/errors.js";
+import { canonicalJson, sha256 } from "#app/hash.js";
 import {
   assessCaptureCandidate,
   toCapturedMemory,
   type AutomaticCaptureCandidate,
   type CapturedMemory,
-} from "./memory-capture.js";
+} from "#app/memory-capture.js";
 import {
   createForgetPreviewToken,
   invalidForgetPreviewToken,
   verifyForgetPreviewToken,
   type ForgetReasonCode,
-} from "./forget-preview-token.js";
-import { executeIdempotent } from "./idempotency.js";
+} from "#app/forget-preview-token.js";
+import { executeIdempotent } from "#app/idempotency.js";
 import {
   assertRepositoryAllowed,
   requireAnyPermission,
   requirePermission,
   type Principal,
-} from "./principal.js";
+} from "#app/principal.js";
 import type {
   AgentRunFinishInput,
   DecisionInput,
@@ -32,7 +32,7 @@ import type {
   SyncCompleteInput,
   SyncItem,
   SyncStartInput,
-} from "./schemas.js";
+} from "#app/schemas.js";
 
 interface RepositoryRow {
   id: string;

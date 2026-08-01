@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { canonicalJson, hashRequest } from "./hash.js";
+import { canonicalJson, hashRequest } from "#app/hash.js";
 
 test("canonical JSON sorts object keys without changing array order", () => {
   assert.equal(canonicalJson({ b: 1, a: { z: 3, y: 2 } }), '{"a":{"y":2,"z":3},"b":1}');

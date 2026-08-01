@@ -6,7 +6,7 @@ import {
   automaticCaptureKey,
   toCapturedMemory,
   type AutomaticCaptureCandidate,
-} from "./memory-capture.js";
+} from "#app/memory-capture.js";
 
 const candidate = (
   overrides: Partial<AutomaticCaptureCandidate> = {},

@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { QueryResultRow } from "pg";
 
-import type { Database, SqlClient } from "./database.js";
-import { listMemoryInbox } from "./read-services.js";
-import type { Principal } from "./principal.js";
+import type { Database, SqlClient } from "#app/database.js";
+import { listMemoryInbox } from "#app/read-services.js";
+import type { Principal } from "#app/principal.js";
 
 const principal: Principal = {
   principalId: "11111111-1111-4111-8111-111111111111",

@@ -4,8 +4,8 @@ import test from "node:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 
-import { McpApiClient } from "./mcp-api-client.js";
-import { createMcpServer } from "./mcp-server.js";
+import { McpApiClient } from "#app/mcp-api-client.js";
+import { createMcpServer } from "#app/mcp-server.js";
 
 test("MCP server exposes all ten tools and translates API calls", async () => {
   const requests: Array<{ url: string; init: RequestInit }> = [];
