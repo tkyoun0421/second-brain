@@ -12,7 +12,7 @@
   "scripts": {
     "dev": "node --use-system-ca --import tsx --watch src/index.ts",
     "start": "node --use-system-ca --import tsx src/index.ts",
-    "mcp": "node --use-system-ca --import tsx src/mcp-server.ts",
+    "mcp": "node --use-system-ca --import tsx src/modules/mcp/mcp-server.ts",
     "check": "tsc --noEmit",
     "test": "tsx --test src/**/*.test.ts scripts/**/*.test.ts",
     "validate:schema": "node scripts/validate-db-schema.mjs",

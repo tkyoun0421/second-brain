@@ -3,10 +3,10 @@ import test from "node:test";
 import type { QueryResultRow } from "pg";
 
 import { buildApp } from "#app/app.js";
-import type { PrincipalVerifier } from "#app/auth.js";
-import type { Database } from "#app/database.js";
-import { ApiError } from "#app/errors.js";
-import type { Principal } from "#app/principal.js";
+import type { PrincipalVerifier } from "#app/common/auth/auth.service.js";
+import type { Database } from "#app/common/database/database.js";
+import { ApiError } from "#app/common/errors/errors.js";
+import type { Principal } from "#app/common/auth/principal.js";
 
 const principal: Principal = {
   principalId: "11111111-1111-4111-8111-111111111111",

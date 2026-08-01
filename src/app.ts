@@ -2,15 +2,14 @@ import { randomUUID } from "node:crypto";
 
 import Fastify, { type FastifyInstance } from "fastify";
 
-import type { PrincipalVerifier } from "#app/auth.js";
-import type { Database } from "#app/database.js";
-import { asApiError } from "#app/errors.js";
-import { registerAgentRunRoutes } from "#app/http/routes/agent-run-routes.js";
-import { registerGithubSyncRoutes } from "#app/http/routes/github-sync-routes.js";
-import { registerMemoryReadRoutes } from "#app/http/routes/memory-read-routes.js";
-import { registerMemoryWriteRoutes } from "#app/http/routes/memory-write-routes.js";
-import { registerSystemRoutes } from "#app/http/routes/system-routes.js";
-import type { Principal } from "#app/principal.js";
+import type { PrincipalVerifier } from "#app/common/auth/auth.service.js";
+import type { Database } from "#app/common/database/database.js";
+import { asApiError } from "#app/common/errors/errors.js";
+import type { Principal } from "#app/common/auth/principal.js";
+import { registerAgentRunsModule } from "#app/modules/agent-runs/agent-runs.module.js";
+import { registerGithubSyncModule } from "#app/modules/github-sync/github-sync.module.js";
+import { registerMemoriesModule } from "#app/modules/memories/memories.module.js";
+import { registerVerificationModule } from "#app/modules/verification/verification.module.js";
 
 declare module "fastify" {
   interface FastifyRequest {
@@ -75,11 +74,10 @@ export const buildApp = (dependencies: AppDependencies): FastifyInstance => {
     });
   });
 
-  registerSystemRoutes(app, dependencies);
-  registerGithubSyncRoutes(app, dependencies);
-  registerMemoryReadRoutes(app, dependencies);
-  registerMemoryWriteRoutes(app, dependencies);
-  registerAgentRunRoutes(app, dependencies);
+  registerVerificationModule(app, dependencies);
+  registerGithubSyncModule(app, dependencies);
+  registerMemoriesModule(app, dependencies);
+  registerAgentRunsModule(app, dependencies);
 
   return app;
 };
