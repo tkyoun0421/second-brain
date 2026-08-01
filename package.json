@@ -4,19 +4,24 @@
   "private": true,
   "type": "module",
   "imports": {
-    "#app/*": "./src/*"
+    "#app/*": {
+      "types": "./src/*",
+      "development": "./src/*",
+      "default": "./dist/*"
+    }
   },
   "engines": {
     "node": ">=22"
   },
   "scripts": {
-    "dev": "node --use-system-ca --import tsx --watch src/index.ts",
-    "start": "node --use-system-ca --import tsx src/index.ts",
-    "mcp": "node --use-system-ca --import tsx src/modules/mcp/mcp-server.ts",
+    "dev": "node --conditions=development --use-system-ca --import tsx --watch src/index.ts",
+    "start": "node --use-system-ca dist/index.js",
+    "mcp": "node --conditions=development --use-system-ca --import tsx src/modules/mcp/mcp-server.ts",
     "check": "tsc --noEmit",
-    "test": "tsx --test src/**/*.test.ts scripts/**/*.test.ts",
+    "build": "tsc --outDir dist && node --use-system-ca scripts/verify-production-build.mjs",
+    "test": "node --conditions=development --import tsx --test src/**/*.test.ts scripts/**/*.test.ts",
     "validate:schema": "node scripts/validate-db-schema.mjs",
-    "verify": "npm run check && npm run test && npm run validate:schema"
+    "verify": "npm run check && npm run build && npm run test && npm run validate:schema"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",

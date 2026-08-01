@@ -1,4 +1,18 @@
 {
-  "description": "Memory capture is explicit so regular final responses are never interrupted.",
-  "hooks": {}
+  "description": "Run production verification before Codex finalizes repository work.",
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/verify-before-stop.mjs\"",
+            "commandWindows": "powershell.exe -NoProfile -Command \"node (Join-Path ((git rev-parse --show-toplevel).Trim()) '.codex\\hooks\\verify-before-stop.mjs')\"",
+            "timeout": 120,
+            "statusMessage": "Running production verification"
+          }
+        ]
+      }
+    ]
+  }
 }
