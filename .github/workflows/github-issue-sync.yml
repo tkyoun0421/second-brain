@@ -29,7 +29,10 @@ jobs:
     timeout-minutes: 30
     env:
       SECOND_BRAIN_API_URL: ${{ secrets.SECOND_BRAIN_API_URL }}
-      SECOND_BRAIN_GITHUB_SYNC_TOKEN: ${{ secrets.SECOND_BRAIN_GITHUB_SYNC_TOKEN }}
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_PUBLISHABLE_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
+      SECOND_BRAIN_GITHUB_SYNC_EMAIL: ${{ secrets.SECOND_BRAIN_GITHUB_SYNC_EMAIL }}
+      SECOND_BRAIN_GITHUB_SYNC_PASSWORD: ${{ secrets.SECOND_BRAIN_GITHUB_SYNC_PASSWORD }}
       GITHUB_TOKEN: ${{ github.token }}
       SYNC_MODE: ${{ inputs.mode || (github.event.schedule == '43 3 * * 1' && 'reconcile' || 'incremental') }}
     steps:
@@ -45,7 +48,28 @@ jobs:
       - name: Verify required sync configuration
         run: |
           test -n "$SECOND_BRAIN_API_URL"
-          test -n "$SECOND_BRAIN_GITHUB_SYNC_TOKEN"
+          test -n "$SUPABASE_URL"
+          test -n "$SUPABASE_PUBLISHABLE_KEY"
+          test -n "$SECOND_BRAIN_GITHUB_SYNC_EMAIL"
+          test -n "$SECOND_BRAIN_GITHUB_SYNC_PASSWORD"
+
+      - name: Issue a fresh GitHub sync access token
+        shell: bash
+        run: |
+          set -euo pipefail
+          payload="$(jq -cn \
+            --arg email "$SECOND_BRAIN_GITHUB_SYNC_EMAIL" \
+            --arg password "$SECOND_BRAIN_GITHUB_SYNC_PASSWORD" \
+            '{email: $email, password: $password}')"
+          access_token="$(curl --fail --silent --show-error \
+            --request POST \
+            --header "apikey: $SUPABASE_PUBLISHABLE_KEY" \
+            --header "Content-Type: application/json" \
+            --data "$payload" \
+            "${SUPABASE_URL%/}/auth/v1/token?grant_type=password" \
+            | jq -er '.access_token')"
+          echo "::add-mask::$access_token"
+          printf 'SECOND_BRAIN_GITHUB_SYNC_TOKEN=%s\n' "$access_token" >> "$GITHUB_ENV"
 
       - name: Synchronize issues and comments
         run: ./node_modules/.bin/tsx scripts/github-sync.mts --mode="$SYNC_MODE"
