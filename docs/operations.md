@@ -8,7 +8,8 @@
 API 서버 전용 비밀: DATABASE_URL, MEMORY_FORGET_PREVIEW_SECRET
 API 서버 설정:     SUPABASE_URL, SUPABASE_JWT_ISSUER, SUPABASE_JWT_AUDIENCE, HOST, PORT
 MCP 호스트 전용:    SECOND_BRAIN_API_URL, SECOND_BRAIN_MCP_ACCESS_TOKEN
-GitHub Actions 전용: SECOND_BRAIN_API_URL, SECOND_BRAIN_GITHUB_SYNC_TOKEN, github.token
+GitHub Actions 전용: SECOND_BRAIN_API_URL, SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY,
+                       SECOND_BRAIN_GITHUB_SYNC_EMAIL, SECOND_BRAIN_GITHUB_SYNC_PASSWORD, github.token
 ```
 
 - API 서버는 PostgreSQL에 연결하고 Supabase JWKS로 bearer JWT를 검증합니다.
@@ -100,6 +101,9 @@ values (
 | Secret | 용도 |
 | --- | --- |
 | `SECOND_BRAIN_API_URL` | HTTPS로 공개된 API base URL (로컬 loopback URL은 GitHub-hosted runner에서 사용할 수 없음) |
-| `SECOND_BRAIN_GITHUB_SYNC_TOKEN` | `principal_type: github_sync`, `github_sync:checkpoint`·`github_source:write` 권한과 해당 repository node ID 범위를 가진 최소 권한 API JWT |
+| `SUPABASE_URL` | 동기화 전용 기술 계정으로 로그인할 Supabase 프로젝트 URL |
+| `SUPABASE_PUBLISHABLE_KEY` | Supabase Auth 로그인에 쓰는 publishable key |
+| `SECOND_BRAIN_GITHUB_SYNC_EMAIL` | `github_sync` 권한을 부여한 기술 계정 이메일 |
+| `SECOND_BRAIN_GITHUB_SYNC_PASSWORD` | 동기화 전용 기술 계정 비밀번호 |
 
-workflow는 GitHub REST 호출에 Actions가 제공하는 임시 `github.token`만 쓰며, DB credential이나 Supabase service-role key를 사용하지 않습니다. `github_sync` token의 발급·회수 방식은 JWT issuer 설계와 함께 아직 확정해야 합니다.
+workflow는 매 실행 시 Supabase Auth로 새 `github_sync` access token을 발급합니다. GitHub REST 호출에는 Actions가 제공하는 임시 `github.token`만 쓰며, DB credential이나 Supabase service-role key를 사용하지 않습니다.

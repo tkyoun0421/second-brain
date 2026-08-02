@@ -29,7 +29,7 @@ Terminate TLS at the platform ingress and only use the HTTPS public URL for MCP 
 
 1. Deploy and call `https://<api-domain>/v1/health`; expect `{"data":{"status":"ok"}}`.
 2. Mint a short-lived least-privilege MCP JWT and run an authenticated context query against the HTTPS URL.
-3. Add the production URL as GitHub Actions secret `SECOND_BRAIN_API_URL` and a repository-scoped `github_sync` JWT as `SECOND_BRAIN_GITHUB_SYNC_TOKEN`.
+3. Add the production URL as GitHub Actions secret `SECOND_BRAIN_API_URL`, plus `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, `SECOND_BRAIN_GITHUB_SYNC_EMAIL`, and `SECOND_BRAIN_GITHUB_SYNC_PASSWORD`. The workflow signs in as the repository-scoped `github_sync` technical account each time it runs.
 4. Run **GitHub Issue Sync** manually in `incremental` mode, check the run result, then run `reconcile` once after verifying the imported records.
 
 If an API token or database URL is exposed, revoke/rotate it before proceeding.

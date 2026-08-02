@@ -81,7 +81,7 @@
 - 삭제, 상태 변경과 라벨 변경을 반영함
 - 실패 후 다음 실행에서 복구 가능
 
-workflow와 증분 수집 어댑터는 구현되었습니다. reconcile은 완전한 원격 목록 수집 후 서버가 `last_seen_sync_run_id`로 누락 후보와 두 번째 누락 tombstone을 반영합니다. 실제 실행에는 `SECOND_BRAIN_API_URL`과 repository 범위의 `SECOND_BRAIN_GITHUB_SYNC_TOKEN` secret, HTTPS API 배포가 필요합니다.
+workflow와 증분 수집 어댑터는 구현되었습니다. reconcile은 완전한 원격 목록 수집 후 서버가 `last_seen_sync_run_id`로 누락 후보와 두 번째 누락 tombstone을 반영합니다. 실제 실행에는 `SECOND_BRAIN_API_URL`, Supabase 로그인 설정, `github_sync` 기술 계정, HTTPS API 배포가 필요합니다.
 
 ## 3단계: 로컬 MCP
 
